@@ -27,7 +27,7 @@ st.markdown("""
 }
 </style>
 <div class="footer">
-    Dibuat oleh <strong>RBKA</strong> untuk digunakan internal <strong>Antasena</strong>
+    Dibuat oleh <strong>POKJA DATA DAN INFORMASI</strong> untuk digunakan internal <strong>Antasena</strong>
 </div>
 """, unsafe_allow_html=True)
 
@@ -62,8 +62,8 @@ if uploaded_file is not None:
             selected_sheet = st.selectbox("Pilih Sheet:", daftar_sheet)
         
         # --- FITUR BARU: PREVIEW RAW DATA ---
-        # Baca 10 baris pertama TANPA header untuk membantu user melihat posisi header
-        df_preview_raw = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=None, nrows=10)
+        # Baca 15 baris pertama TANPA header untuk membantu user melihat posisi header
+        df_preview_raw = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=None, nrows=15)
         df_preview_raw = df_preview_raw.fillna('') # Biar rapi di tampilan
         
         with st.expander("🔍 Klik untuk melihat Preview Data Mentah (Cek posisi Header disini)", expanded=True):
