@@ -129,7 +129,7 @@ if uploaded_file is not None:
                             elif not val.isdigit():
                                 return "BUKAN ANGKA"
                             elif val.endswith("00"):
-                                return "TERKONVENSI (00)"
+                                return "TERKONVERSI (00)"
                             elif count == 1:
                                 return "UNIK"
                             else:
