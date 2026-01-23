@@ -4,14 +4,38 @@ import io
 from datetime import datetime
 
 # --- 1. KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Cek Validitas Multi-Kolom", layout="wide")
+st.set_page_config(page_title="Cek Validitas Internal Antasena", layout="wide")
 
-# --- 2. FUNGSI LOGGING (Support Multi Kolom) ---
+# --- 2. STYLE & FOOTER (CSS) ---
+# Kita menyuntikkan CSS agar footer menempel rapi di bawah
+st.markdown("""
+<style>
+.footer {
+    position: fixed;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    background-color: #f8f9fa; /* Warna abu-abu muda */
+    color: #6c757d;
+    text-align: center;
+    padding: 10px;
+    font-size: 13px;
+    border-top: 1px solid #dee2e6;
+    z-index: 1000;
+}
+.content {
+    margin-bottom: 60px; /* Memberi jarak agar konten tidak tertutup footer */
+}
+</style>
+<div class="footer">
+    Dibuat oleh <strong>RBKA</strong> untuk digunakan internal <strong>Antasena</strong>
+</div>
+""", unsafe_allow_html=True)
+
+# --- 3. FUNGSI LOGGING ---
 def catat_log(nama_file, nama_sheet, rincian_per_kolom):
     waktu = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    # Format log agar rapi untuk banyak kolom
-    # Contoh: [NIK: {Unik:90, Ganda:10} | KK: {Unik:100}]
     summary_text = ""
     for col, stats in rincian_per_kolom.items():
         stat_str = ", ".join([f"{k}:{v}" for k, v in stats.items()])
@@ -22,15 +46,15 @@ def catat_log(nama_file, nama_sheet, rincian_per_kolom):
     with open("activity_log.txt", "a") as f:
         f.write(pesan)
 
-# --- 3. LOGIKA UTAMA ---
-st.title("🛡️ Validasi Data Multi-Kolom")
-st.info("Fitur Baru: Anda bisa memilih LEBIH DARI SATU kolom (misal: NIK dan KK) untuk diperiksa sekaligus.")
+# --- 4. LOGIKA UTAMA ---
+st.title("🛡️ Validasi Data - Internal Antasena")
+st.info("Fitur: Multi-Kolom, Multi-Sheet, & Auto-Format Text. Data diproses aman di RAM.")
 
 uploaded_file = st.file_uploader("Upload file Excel (.xlsx)", type=["xlsx"])
 
 if uploaded_file is not None:
     try:
-        # --- LANGKAH 1: BACA METADATA ---
+        # --- LANGKAH 1: BACA STRUKTUR FILE ---
         xls = pd.ExcelFile(uploaded_file)
         daftar_sheet = xls.sheet_names
         
@@ -43,38 +67,36 @@ if uploaded_file is not None:
         
         # --- LANGKAH 3: BACA DATA ---
         df = pd.read_excel(uploaded_file, sheet_name=selected_sheet)
-        df = df.astype(str) # Paksa string sejak awal
+        df = df.astype(str) # Paksa string
         
-        # --- LANGKAH 4: PILIH BANYAK KOLOM (MULTI-SELECT) ---
+        # --- LANGKAH 4: PILIH BANYAK KOLOM ---
         st.caption(f"Preview Data Sheet: **{selected_sheet}**")
         st.dataframe(df.head(), use_container_width=True)
         
         cols = df.columns.tolist()
         
-        # PERUBAHAN UTAMA DISINI: multiselect
         target_cols = st.multiselect(
-            "Pilih Kolom-kolom yang akan dicek (Bisa NIK, KK, No. HP, dll):", 
+            "Pilih Kolom-kolom yang akan dicek (Contoh: NIK, No. KK):", 
             cols,
-            placeholder="Klik untuk memilih satu atau lebih kolom..."
+            placeholder="Klik untuk memilih kolom..."
         )
         
         if st.button("🚀 Proses Cek Data") and target_cols:
-            with st.spinner('Sedang memproses multi-kolom...'):
+            with st.spinner('Sedang memproses...'):
                 df_result = df.copy()
-                log_data_all = {} # Penampung data log
+                log_data_all = {}
                 
-                # --- LOOPING UNTUK SETIAP KOLOM YANG DIPILIH ---
+                # --- LOOPING TIAP KOLOM ---
                 for col_name in target_cols:
                     
-                    # 1. Bersihkan Data Spesifik Kolom Ini
+                    # Bersihkan
                     df_result[col_name] = df_result[col_name].replace('nan', '')
                     
-                    # 2. Hitung Running Count (Khusus kolom ini)
-                    # Kita pakai nama variabel temporary yang unik agar tidak bentrok antar kolom
+                    # Helper count
                     temp_count_col = f"__temp_count_{col_name}"
                     df_result[temp_count_col] = df_result.groupby(col_name).cumcount() + 1
                     
-                    # 3. Definisikan Logika (Inner Function)
+                    # Logic
                     def cek_validitas(row, c_name, c_temp):
                         val = row[c_name]
                         count = row[c_temp]
@@ -91,20 +113,17 @@ if uploaded_file is not None:
                         else:
                             return f"GANDA {count}"
                     
-                    # 4. Terapkan Logika
-                    # Nama kolom hasil: "STATUS_NIK", "STATUS_KK", dst
+                    # Apply
                     result_col_name = f"STATUS_{col_name}"
                     df_result[result_col_name] = df_result.apply(
                         lambda row: cek_validitas(row, col_name, temp_count_col), 
                         axis=1
                     )
                     
-                    # 5. Bersihkan kolom bantuan
                     df_result.drop(columns=[temp_count_col], inplace=True)
                     
-                    # 6. Siapkan Data untuk Log
+                    # Stats untuk Log
                     counts = df_result[result_col_name].value_counts()
-                    # Grouping log biar rapi
                     col_log = {}
                     ganda_sum = 0
                     for k, v in counts.items():
@@ -113,21 +132,16 @@ if uploaded_file is not None:
                         else:
                             col_log[k] = v
                     if ganda_sum > 0: col_log['GANDA'] = ganda_sum
-                    
                     log_data_all[col_name] = col_log
 
-                # --- SIMPAN LOG GLOBAL ---
+                # Catat Log
                 catat_log(uploaded_file.name, selected_sheet, log_data_all)
 
-                # --- TAMPILKAN HASIL ---
-                st.success("✅ Pemeriksaan Multi-Kolom Selesai!")
-                
-                # Tampilkan tabel hasil
-                # Urutkan kolom agar STATUS muncul di sebelah kolom aslinya (Opsional, tapi bagus untuk UX)
-                # Untuk sederhananya, kita taruh semua kolom STATUS di paling kanan
+                # --- HASIL & DOWNLOAD ---
+                st.success("✅ Pemeriksaan Selesai!")
                 st.dataframe(df_result, use_container_width=True)
                 
-                # --- EXPORT EXCEL (TEXT FORMAT) ---
+                # Export to Buffer
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
                     sheet_export = f"Cek_{selected_sheet}"[:30]
@@ -137,14 +151,8 @@ if uploaded_file is not None:
                     ws = writer.sheets[sheet_export]
                     txt_fmt = wb.add_format({'num_format': '@'})
                     
-                    # Format Text untuk semua kolom
                     for idx, col in enumerate(df_result.columns):
                         ws.set_column(idx, idx, 25, txt_fmt)
-                        
-                        # (Opsional) Highlight Header Kolom STATUS dengan warna beda
-                        if str(col).startswith("STATUS_"):
-                            # Logic tambahan jika ingin styling header, tapi default sudah oke
-                            pass
 
                 buffer.seek(0)
                 st.download_button(
@@ -155,15 +163,15 @@ if uploaded_file is not None:
                 )
         
         elif not target_cols and uploaded_file:
-            st.warning("⚠️ Silakan pilih minimal 1 kolom untuk diperiksa.")
+            st.warning("⚠️ Pilih minimal 1 kolom dulu.")
                 
     except Exception as e:
         st.error(f"Terjadi kesalahan: {e}")
 
-# Admin Log
+# Admin Sidebar
 with st.sidebar:
-    st.header("⚙️ Admin Log")
-    if st.checkbox("Lihat Log"):
+    st.header("⚙️ Admin Panel")
+    if st.checkbox("Lihat Log Aktivitas"):
         try:
             with open("activity_log.txt", "r") as f:
                 st.text(f.read())
@@ -171,3 +179,6 @@ with st.sidebar:
     if st.button("Hapus Log"):
         try: open("activity_log.txt", "w").close(); st.rerun()
         except: pass
+        
+# Spacer kosong di bawah agar konten tidak tertutup footer saat discroll pol mentok
+st.write("<br><br><br>", unsafe_allow_html=True)
