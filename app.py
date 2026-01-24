@@ -1,10 +1,11 @@
 import streamlit as st
 import pandas as pd
 import io
+import plotly.express as px
 from datetime import datetime
 
 # --- 1. KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Cek Validitas Data BNBA Internal Antasena", layout="wide")
+st.set_page_config(page_title="Dashboard Validasi Data Internal Sentra Antasena", layout="wide")
 
 # --- 2. STYLE & FOOTER (CSS) ---
 st.markdown("""
@@ -23,7 +24,12 @@ st.markdown("""
     z-index: 1000;
 }
 .stApp {
-    margin-bottom: 80px; /* Jarak aman agar konten tidak tertutup footer */
+    margin-bottom: 80px;
+}
+[data-testid="stMetricValue"] {
+    font-size: 2rem;
+    font-weight: bold;
+    color: #0d6efd;
 }
 </style>
 <div class="footer">
@@ -36,17 +42,29 @@ def catat_log(nama_file, nama_sheet, rincian_per_kolom):
     waktu = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     summary_text = ""
     for col, stats in rincian_per_kolom.items():
-        stat_str = ", ".join([f"{k}:{v}" for k, v in stats.items()])
+        # (Menggabungkan semua Ganda menjadi satu angka di Log)
+        simple_stats = {}
+        ganda_total = 0
+        for k, v in stats.items():
+            if str(k).startswith("GANDA"):
+                ganda_total += v
+            else:
+                simple_stats[k] = v
+        if ganda_total > 0:
+            simple_stats['GANDA (TOTAL)'] = ganda_total
+            
+        stat_str = ", ".join([f"{k}:{v}" for k, v in simple_stats.items()])
         summary_text += f"[{col}: {stat_str}] "
+        
     pesan = f"[{waktu}] FILE: {nama_file} | SHEET: {nama_sheet} | DETAIL: {summary_text}\n"
     with open("activity_log.txt", "a") as f:
         f.write(pesan)
 
 # --- 4. LOGIKA UTAMA ---
-st.title("🛡️ Validasi Data - Internal Antasena")
-st.info("Fitur Lengkap: Atur Posisi Header, Multi-Kolom, Multi-Sheet, & Auto-Format Text.")
+st.title("📊 Dashboard Validasi Data - Internal Antasena")
+st.info("Fitur: Atur Posisi Header, Multi-Kolom, Multi-Sheet, Visualisasi, & Auto-Format Text.")
 
-uploaded_file = st.file_uploader("Upload file Excel disini(.xlsx)", type=["xlsx"])
+uploaded_file = st.file_uploader("Upload file Excel (.xlsx)", type=["xlsx"])
 
 if uploaded_file is not None:
     try:
@@ -61,34 +79,22 @@ if uploaded_file is not None:
         with col_sheet:
             selected_sheet = st.selectbox("Pilih Sheet:", daftar_sheet)
         
-        # --- PREVIEW RAW DATA ---
-        # Baca 15 baris pertama TANPA header untuk membantu user melihat posisi header
-        df_preview_raw = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=None, nrows=15)
-        df_preview_raw = df_preview_raw.fillna('') # Biar rapi di tampilan
+        # PREVIEW RAW DATA
+        df_preview_raw = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=None, nrows=10)
+        df_preview_raw = df_preview_raw.fillna('') 
         
-        with st.expander("🔍 Klik untuk melihat Preview Data Mentah (Cek posisi Header disini)", expanded=True):
-            st.caption("Lihat tabel di bawah ini. Di baris nomor berapakah nama kolom (Header) Anda berada?")
-            # Trik agar index mulai dari 1 di tampilan, bukan 0
+        with st.expander("🔍 Klik untuk melihat Preview Data Mentah (Cek posisi Header)", expanded=False):
+            st.caption("Baris ke berapa Header tabel Anda?")
             df_preview_raw.index += 1 
             st.dataframe(df_preview_raw, use_container_width=True)
 
-        # --- PILIH URUTAN ROW ---
+        # PILIH URUTAN ROW
         with col_header_row:
-            header_row_input = st.number_input(
-                "Header Table ada di baris ke:", 
-                min_value=1, 
-                value=1, 
-                help="Jika judul kolom ada di baris 3, isi angka 3."
-            )
+            header_row_input = st.number_input("Header Table ada di baris ke:", min_value=1, value=1)
 
         # --- LANGKAH 3: BACA DATA ---
-        # header=header_row_input - 1 
         df = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=header_row_input - 1)
-        
-        # Hapus baris yang kosong semua 
         df.dropna(how='all', inplace=True)
-        
-        # Memastikan semua string agar tidak terconvert
         df = df.astype(str) 
         
         # --- LANGKAH 4: PILIH KOLOM ---
@@ -96,24 +102,22 @@ if uploaded_file is not None:
         st.subheader("2. Pilih Kolom Data")
         cols = df.columns.tolist()
         
-        # Validasi jika kolom kosong 
         if len(cols) == 0:
-            st.error("⚠️ Tidak ditemukan nama kolom. Coba cek kembali nomor baris Header di atas.")
+            st.error("⚠️ Header tidak ditemukan.")
         else:
             target_cols = st.multiselect(
-                "Pilih Kolom yang akan dicek (Contoh: NIK, No. KK):", 
+                "Pilih Kolom yang akan dicek:", 
                 cols,
-                placeholder="Klik untuk memilih kolom..."
+                placeholder="Pilih kolom NIK, KK, dll..."
             )
             
-            if st.button("🚀 Proses Cek Data") and target_cols:
-                with st.spinner('Sedang memproses...'):
+            if st.button("🚀 Proses & Analisa Data") and target_cols:
+                with st.spinner('Sedang memproses dan membuat grafik...'):
                     df_result = df.copy()
                     log_data_all = {}
                     
-                    # --- LOOPING TIAP KOLOM ---
+                    # --- PROCESSING LOOP ---
                     for col_name in target_cols:
-                        
                         df_result[col_name] = df_result[col_name].replace('nan', '')
                         
                         temp_count_col = f"__temp_count_{col_name}"
@@ -124,46 +128,110 @@ if uploaded_file is not None:
                             count = row[c_temp]
                             val = val.replace('.0', '').strip()
                             
-                            if len(val) != 16:
-                                return "TIDAK 16 DIGIT"
-                            elif not val.isdigit():
-                                return "BUKAN ANGKA"
-                            elif val.endswith("00"):
-                                return "TERKONVERSI (00)"
-                            elif count == 1:
-                                return "UNIK"
-                            else:
-                                return f"GANDA {count}"
-                        
+                            if len(val) != 16: return "TIDAK 16 DIGIT"
+                            elif not val.isdigit(): return "BUKAN ANGKA"
+                            elif val.endswith("00"): return "TERKONVENSI (00)"
+                            elif count == 1: return "UNIK"
+                            else: return f"GANDA {count}" 
+
+                        # Terapkan Logic ke kolom STATUS
                         result_col_name = f"STATUS_{col_name}"
                         df_result[result_col_name] = df_result.apply(
-                            lambda row: cek_validitas(row, col_name, temp_count_col), 
-                            axis=1
+                            lambda row: cek_validitas(row, col_name, temp_count_col), axis=1
                         )
                         
+                        # Hapus kolom bantuan hitungan
                         df_result.drop(columns=[temp_count_col], inplace=True)
                         
-                        # Logging Stats
-                        counts = df_result[result_col_name].value_counts()
-                        col_log = {}
-                        ganda_sum = 0
-                        for k, v in counts.items():
-                            if str(k).startswith("GANDA"):
-                                ganda_sum += v
-                            else:
-                                col_log[k] = v
-                        if ganda_sum > 0: col_log['GANDA'] = ganda_sum
-                        log_data_all[col_name] = col_log
+                        # Simpan data mentah untuk log (nanti disederhanakan di fungsi catat_log)
+                        counts = df_result[result_col_name].value_counts().to_dict()
+                        log_data_all[col_name] = counts
 
                     catat_log(uploaded_file.name, selected_sheet, log_data_all)
 
-                    # --- HASIL & DOWNLOAD ---
-                    st.success("✅ Pemeriksaan Selesai!")
+                    # ==========================================
+                    # BAGIAN DASHBOARD (GROUPING LOGIC)
+                    # ==========================================
+                    st.divider()
+                    st.subheader("📊 Hasil Analisa Visual")
+                    
+                    tabs = st.tabs([f"Analisa: {c}" for c in target_cols])
+                    
+                    for i, col_name in enumerate(target_cols):
+                        with tabs[i]:
+                            status_col = f"STATUS_{col_name}"
+                            
+                            # --- TEKNIK GROUPING UNTUK VISUALISASI ---
+                            # Kita buat kolom sementara di memory (Series) untuk grafik
+                            # Logikanya: Jika text dimulai dengan "GANDA", ubah jadi "GANDA". Selain itu biarkan.
+                            viz_series = df_result[status_col].apply(
+                                lambda x: "GANDA" if str(x).startswith("GANDA") else x
+                            )
+                            
+                            data_counts = viz_series.value_counts().reset_index()
+                            data_counts.columns = ['Status', 'Jumlah']
+                            
+                            # METRICS
+                            total_data = len(df_result)
+                            total_unik = len(df_result[df_result[status_col] == 'UNIK'])
+                            total_masalah = total_data - total_unik
+                            
+                            m1, m2, m3 = st.columns(3)
+                            m1.metric("Total Data", total_data)
+                            m2.metric("Data Valid (UNIK)", total_unik)
+                            m3.metric("Data Perlu Perbaikan", total_masalah, delta_color="inverse")
+                            
+                            st.markdown("---")
+                            
+                            # GRAFIK
+                            col_grafik1, col_grafik2 = st.columns(2)
+                            
+                            # Warna
+                            color_map = {
+                                "UNIK": "#28a745",
+                                "GANDA": "#dc3545", # Merah untuk semua jenis Ganda
+                                "BUKAN ANGKA": "#ffc107",
+                                "TIDAK 16 DIGIT": "#fd7e14",
+                                "TERKONVENSI (00)": "#17a2b8"
+                            }
+
+                            with col_grafik1:
+                                fig_pie = px.pie(
+                                    data_counts, 
+                                    values='Jumlah', 
+                                    names='Status',
+                                    title=f'Persentase (Ganda disatukan): {col_name}',
+                                    color='Status',
+                                    color_discrete_map=color_map,
+                                    hole=0.4
+                                )
+                                st.plotly_chart(fig_pie, use_container_width=True)
+                                
+                            with col_grafik2:
+                                fig_bar = px.bar(
+                                    data_counts,
+                                    x='Status',
+                                    y='Jumlah',
+                                    title=f'Jumlah Error (Ganda disatukan): {col_name}',
+                                    color='Status',
+                                    color_discrete_map=color_map,
+                                    text='Jumlah'
+                                )
+                                fig_bar.update_traces(textposition='outside')
+                                st.plotly_chart(fig_bar, use_container_width=True)
+
+                    # ==========================================
+                    
+                    # --- OUTPUT TABLE & DOWNLOAD ---
+                    st.divider()
+                    st.subheader("📋 Tabel Detail Data")
+                    st.caption("Perhatikan: Kolom STATUS di tabel ini tetap menunjukkan detail GANDA 2, GANDA 3, dst.")
                     st.dataframe(df_result, use_container_width=True)
                     
                     buffer = io.BytesIO()
                     with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
                         sheet_export = f"Cek_{selected_sheet}"[:30]
+                        
                         df_result.to_excel(writer, index=False, sheet_name=sheet_export)
                         
                         wb = writer.book
@@ -175,9 +243,9 @@ if uploaded_file is not None:
 
                     buffer.seek(0)
                     st.download_button(
-                        label="📥 Download Hasil Lengkap",
+                        label="📥 Download Hasil Detail (Excel)",
                         data=buffer,
-                        file_name=f"MultiCheck_{selected_sheet}_{uploaded_file.name}",
+                        file_name=f"Analisa_{selected_sheet}_{uploaded_file.name}",
                         mime="application/vnd.ms-excel"
                     )
             
@@ -185,8 +253,7 @@ if uploaded_file is not None:
                 st.warning("⚠️ Silakan pilih minimal 1 kolom dulu.")
                 
     except Exception as e:
-        st.error(f"Terjadi kesalahan pembacaan file: {e}")
-        st.warning("Tips: Pastikan 'Header ada di baris ke' sudah sesuai dengan file Excel Anda.")
+        st.error(f"Terjadi kesalahan: {e}")
 
 # Admin Sidebar
 with st.sidebar:
