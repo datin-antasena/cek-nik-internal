@@ -80,7 +80,7 @@ if uploaded_file is not None:
             selected_sheet = st.selectbox("Pilih Sheet:", daftar_sheet)
         
         # PREVIEW RAW DATA
-        df_preview_raw = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=None, nrows=10)
+        df_preview_raw = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=None, nrows=20)
         df_preview_raw = df_preview_raw.fillna('') 
         
         with st.expander("🔍 Klik untuk melihat Preview Data Mentah (Cek posisi Header)", expanded=False):
