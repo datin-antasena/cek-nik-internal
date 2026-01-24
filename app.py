@@ -4,7 +4,7 @@ import io
 from datetime import datetime
 
 # --- 1. KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Cek Validitas Internal Antasena", layout="wide")
+st.set_page_config(page_title="Cek Validitas Data BNBA Internal Antasena", layout="wide")
 
 # --- 2. STYLE & FOOTER (CSS) ---
 st.markdown("""
@@ -27,7 +27,7 @@ st.markdown("""
 }
 </style>
 <div class="footer">
-    Dibuat oleh <strong>POKJA DATA DAN INFORMASI</strong> untuk digunakan internal <strong>Antasena</strong>
+    Dikembangkan oleh <strong>POKJA DATA DAN INFORMASI</strong> untuk digunakan internal <strong>Antasena</strong>
 </div>
 """, unsafe_allow_html=True)
 
@@ -46,7 +46,7 @@ def catat_log(nama_file, nama_sheet, rincian_per_kolom):
 st.title("🛡️ Validasi Data - Internal Antasena")
 st.info("Fitur Lengkap: Atur Posisi Header, Multi-Kolom, Multi-Sheet, & Auto-Format Text.")
 
-uploaded_file = st.file_uploader("Upload file Excel (.xlsx)", type=["xlsx"])
+uploaded_file = st.file_uploader("Upload file Excel disini(.xlsx)", type=["xlsx"])
 
 if uploaded_file is not None:
     try:
@@ -61,7 +61,7 @@ if uploaded_file is not None:
         with col_sheet:
             selected_sheet = st.selectbox("Pilih Sheet:", daftar_sheet)
         
-        # --- FITUR BARU: PREVIEW RAW DATA ---
+        # --- PREVIEW RAW DATA ---
         # Baca 15 baris pertama TANPA header untuk membantu user melihat posisi header
         df_preview_raw = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=None, nrows=15)
         df_preview_raw = df_preview_raw.fillna('') # Biar rapi di tampilan
@@ -72,7 +72,7 @@ if uploaded_file is not None:
             df_preview_raw.index += 1 
             st.dataframe(df_preview_raw, use_container_width=True)
 
-        # --- FITUR BARU: PILIH URUTAN ROW ---
+        # --- PILIH URUTAN ROW ---
         with col_header_row:
             header_row_input = st.number_input(
                 "Header Table ada di baris ke:", 
@@ -81,14 +81,14 @@ if uploaded_file is not None:
                 help="Jika judul kolom ada di baris 3, isi angka 3."
             )
 
-        # --- LANGKAH 3: BACA DATA SESUNGGUHNYA ---
-        # header=header_row_input - 1 (karena Python mulai hitung dari 0, manusia dari 1)
+        # --- LANGKAH 3: BACA DATA ---
+        # header=header_row_input - 1 
         df = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=header_row_input - 1)
         
-        # Hapus baris yang kosong semua (opsional, untuk kebersihan data)
+        # Hapus baris yang kosong semua 
         df.dropna(how='all', inplace=True)
         
-        # Paksa string
+        # Memastikan semua string agar tidak terconvert
         df = df.astype(str) 
         
         # --- LANGKAH 4: PILIH KOLOM ---
@@ -96,7 +96,7 @@ if uploaded_file is not None:
         st.subheader("2. Pilih Kolom Data")
         cols = df.columns.tolist()
         
-        # Validasi jika kolom kosong (biasanya karena salah pilih baris header)
+        # Validasi jika kolom kosong 
         if len(cols) == 0:
             st.error("⚠️ Tidak ditemukan nama kolom. Coba cek kembali nomor baris Header di atas.")
         else:
