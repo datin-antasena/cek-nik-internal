@@ -194,7 +194,7 @@ if uploaded_file is not None:
                             
                             m1, m2, m3 = st.columns(3)
                             m1.metric("Total Data", total_data)
-                            m2.metric("Data Valid (UNIK)", total_unik)
+                            m2.metric("Data Valid (NILAI UNIK)", total_unik)
                             m3.metric("Data Perlu Perbaikan", total_masalah, delta_color="inverse")
                             
                             st.markdown("---")
@@ -204,7 +204,7 @@ if uploaded_file is not None:
                                 "GANDA": "#dc3545",
                                 "BUKAN ANGKA": "#ffc107",
                                 "TIDAK 16 DIGIT": "#fd7e14",
-                                "TERKONVENSI (00)": "#17a2b8",
+                                "TERKONVERSI (00)": "#17a2b8",
                                 "KOSONG": "#6c757d"
                             }
                             with col_grafik1:
