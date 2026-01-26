@@ -119,7 +119,7 @@ if uploaded_file is not None:
                 )
             with col_right:
                 # Opsi untuk mematikan Auto-Clean jika tidak diinginkan (Default: Nyala)
-                use_auto_clean = st.checkbox("✅ Aktifkan Auto-Cleaning", value=True, help="Otomatis menghapus spasi, titik, strip, dan huruf.")
+                use_auto_clean = st.checkbox("Aktifkan Auto-Cleaning", value=True, help="Otomatis menghapus spasi, titik, strip, dan huruf.")
 
             if st.button("🚀 Proses & Analisa Data") and target_cols:
                 with st.spinner('Sedang membersihkan dan memproses data...'):
