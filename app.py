@@ -5,11 +5,12 @@ import plotly.express as px
 from datetime import datetime
 
 # --- 1. KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Dashboard Validasi Data Internal Sentra Antasena", layout="wide")
+st.set_page_config(page_title="Dashboard Validasi Data Internal Antasena", layout="wide")
 
 # --- 2. STYLE & FOOTER ---
 st.markdown("""
 <style>
+/* Footer Style */
 .footer {
     position: fixed;
     left: 0;
@@ -26,22 +27,30 @@ st.markdown("""
 .stApp {
     margin-bottom: 80px;
 }
-/* Style untuk Metrics */
+/* Style untuk Metrics (Angka Besar) */
 [data-testid="stMetricValue"] {
     font-size: 2rem;
     font-weight: bold;
     color: #0d6efd;
 }
-/* Style Checkbox Auto-Clean */
+/* Style KHUSUS Checkbox Auto-Clean */
 .stCheckbox {
-    background-color: #e2e3e5;
+    background-color: #e2e3e5; /* Background Abu-abu */
     padding: 10px;
     border-radius: 5px;
     border: 1px solid #ced4da;
 }
+/* Memaksa teks di dalam Checkbox menjadi HITAM */
+.stCheckbox label p {
+    color: #000000 !important;
+    font-weight: bold;
+}
+.stCheckbox label span {
+    color: #000000 !important;
+}
 </style>
 <div class="footer">
-    Dikembangkan oleh <strong>POKJA DATA DAN INFORMASI</strong> untuk digunakan internal <strong>SENTRA ANTASENA</strong>
+    Dikembangkan oleh <strong>POKJA DATA DAN INFORMASI</strong> untuk digunakan internal <strong>Sentra Antasena</strong>
 </div>
 """, unsafe_allow_html=True)
 
@@ -86,7 +95,7 @@ if uploaded_file is not None:
             selected_sheet = st.selectbox("Pilih Sheet:", daftar_sheet)
         
         # Preview Data Mentah
-        df_preview_raw = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=None, nrows=20)
+        df_preview_raw = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=None, nrows=10)
         df_preview_raw = df_preview_raw.fillna('') 
         
         with st.expander("🔍 Klik untuk melihat Preview Data Mentah (Cek posisi Header)", expanded=False):
@@ -118,8 +127,8 @@ if uploaded_file is not None:
                     placeholder="Pilih kolom NIK, KK, dll..."
                 )
             with col_right:
-                # Opsi untuk mematikan Auto-Clean jika tidak diinginkan (Default: Nyala)
-                use_auto_clean = st.checkbox("Aktifkan Auto-Cleaning", value=True, help="Otomatis menghapus spasi, titik, strip, dan huruf.")
+                # Checkbox dengan style khusus (sekarang teksnya sudah hitam)
+                use_auto_clean = st.checkbox("✅ Aktifkan Auto-Cleaning", value=True, help="Otomatis menghapus spasi, titik, strip, dan huruf.")
 
             if st.button("🚀 Proses & Analisa Data") and target_cols:
                 with st.spinner('Sedang membersihkan dan memproses data...'):
@@ -131,34 +140,25 @@ if uploaded_file is not None:
                         # 1. Pastikan Nan jadi string kosong
                         df_result[col_name] = df_result[col_name].replace('nan', '')
                         
-                        # =========================================
-                        # FITUR BARU: AUTO CLEANING
-                        # =========================================
+                        # FITUR AUTO CLEANING
                         if use_auto_clean:
-                            # Regex r'\D' artinya: Cari semua karakter yang BUKAN DIGIT (0-9)
-                            # Lalu ganti dengan string kosong ''
-                            # Ini akan menghapus: Spasi, -, ., /, Huruf, Simbol, dll.
                             df_result[col_name] = df_result[col_name].str.replace(r'\D', '', regex=True)
                         else:
-                            # Jika tidak auto clean, cuma trim spasi depan belakang standar
                             df_result[col_name] = df_result[col_name].str.strip()
                         
-                        # 2. Hitung Duplikasi (Running Count)
+                        # 2. Hitung Duplikasi
                         temp_count_col = f"__temp_count_{col_name}"
                         df_result[temp_count_col] = df_result.groupby(col_name).cumcount() + 1
                         
-                        # 3. Logika Validasi (Logic sudah lebih simple karena data sudah bersih)
+                        # 3. Logika Validasi
                         def cek_validitas(row, c_name, c_temp):
                             val = row[c_name]
                             count = row[c_temp]
-                            
-                            # Karena sudah di-clean, kita tidak perlu .replace('.0') lagi secara agresif,
-                            # tapi tetap berjaga-jaga jika cleaning dimatikan user.
                             val = val.replace('.0', '').strip()
                             
-                            if len(val) == 0: return "KOSONG" # Handle sel kosong
+                            if len(val) == 0: return "KOSONG"
                             elif len(val) != 16: return "TIDAK 16 DIGIT"
-                            elif not val.isdigit(): return "BUKAN ANGKA" # Backup check
+                            elif not val.isdigit(): return "BUKAN ANGKA"
                             elif val.endswith("00"): return "TERKONVERSI (00)"
                             elif count == 1: return "UNIK"
                             else: return f"GANDA {count}"
@@ -194,7 +194,7 @@ if uploaded_file is not None:
                             
                             m1, m2, m3 = st.columns(3)
                             m1.metric("Total Data", total_data)
-                            m2.metric("Data Valid (NILAI UNIK)", total_unik)
+                            m2.metric("Data Valid (UNIK)", total_unik)
                             m3.metric("Data Perlu Perbaikan", total_masalah, delta_color="inverse")
                             
                             st.markdown("---")
@@ -244,7 +244,7 @@ if uploaded_file is not None:
     except Exception as e:
         st.error(f"Terjadi kesalahan: {e}")
 
-# Sidebar Admin (Tetap ada untuk log, tanpa login)
+# Sidebar Admin
 with st.sidebar:
     st.header("⚙️ Admin Panel")
     if st.checkbox("Lihat Log Aktivitas"):
