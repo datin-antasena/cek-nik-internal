@@ -5,7 +5,7 @@ import plotly.express as px
 from datetime import datetime
 
 # --- 1. KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Dashboard Validasi Data Internal Antasena", layout="wide")
+st.set_page_config(page_title="Dashboard Validasi NIK/NKK Antasena", layout="wide")
 
 # --- 2. STYLE & FOOTER ---
 st.markdown("""
@@ -27,7 +27,7 @@ st.markdown("""
 .stApp {
     margin-bottom: 80px;
 }
-/* Style untuk Metrics (Angka Besar) */
+/* Style untuk Metrics */
 [data-testid="stMetricValue"] {
     font-size: 2rem;
     font-weight: bold;
@@ -35,7 +35,7 @@ st.markdown("""
 }
 /* Style KHUSUS Checkbox Auto-Clean */
 .stCheckbox {
-    background-color: #e2e3e5; /* Background Abu-abu */
+    background-color: #e2e3e5;
     padding: 10px;
     border-radius: 5px;
     border: 1px solid #ced4da;
@@ -50,7 +50,7 @@ st.markdown("""
 }
 </style>
 <div class="footer">
-    Dikembangkan oleh <strong>POKJA DATA DAN INFORMASI</strong> untuk digunakan internal <strong>Sentra Antasena</strong>
+    Dibuat oleh <strong>RBKA</strong> untuk digunakan internal <strong>Antasena</strong>
 </div>
 """, unsafe_allow_html=True)
 
@@ -77,25 +77,49 @@ def catat_log(nama_file, nama_sheet, rincian_per_kolom):
         f.write(pesan)
 
 # --- 4. APLIKASI UTAMA ---
-st.title("📊 Dashboard Validasi Data - Internal Antasena")
+st.title("📊 Dashboard Validasi Data NIK/NKK - Internal Antasena")
 st.info("Fitur: Atur Posisi Header, Multi-Kolom, Multi-Sheet, Auto Cleansing, Visualisasi, & Auto-Format Text.")
 
-uploaded_file = st.file_uploader("Upload file Excel (.xlsx)", type=["xlsx"])
+uploaded_file = st.file_uploader("Upload file Excel/CSV", type=["xlsx", "xls", "csv"])
 
 if uploaded_file is not None:
     try:
-        # --- BACA STRUKTUR FILE ---
-        xls = pd.ExcelFile(uploaded_file)
-        daftar_sheet = xls.sheet_names
+        # --- BACA DATA ---
+        if uploaded_file.name.endswith('.csv'):
+            try:
+                df_preview_raw = pd.read_csv(uploaded_file, nrows=10)
+            except:
+                uploaded_file.seek(0)
+                df_preview_raw = pd.read_csv(uploaded_file, nrows=10, sep=';')
+                
+            daftar_sheet = ['Sheet1']
+            is_csv = True
+        else:
+            xls = pd.ExcelFile(uploaded_file)
+            daftar_sheet = xls.sheet_names
+            is_csv = False
         
         st.subheader("1. Konfigurasi File")
         col_sheet, col_header_row = st.columns([2, 1])
         
         with col_sheet:
-            selected_sheet = st.selectbox("Pilih Sheet:", daftar_sheet)
+            if not is_csv:
+                selected_sheet = st.selectbox("Pilih Sheet:", daftar_sheet)
+            else:
+                st.info("File CSV terdeteksi (Hanya 1 Sheet).")
+                selected_sheet = daftar_sheet[0]
         
         # Preview Data Mentah
-        df_preview_raw = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=None, nrows=10)
+        if not is_csv:
+            df_preview_raw = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=None, nrows=10)
+        else:
+            uploaded_file.seek(0)
+            try:
+                df_preview_raw = pd.read_csv(uploaded_file, header=None, nrows=10)
+            except:
+                uploaded_file.seek(0)
+                df_preview_raw = pd.read_csv(uploaded_file, header=None, nrows=10, sep=';')
+            
         df_preview_raw = df_preview_raw.fillna('') 
         
         with st.expander("🔍 Klik untuk melihat Preview Data Mentah (Cek posisi Header)", expanded=False):
@@ -107,9 +131,17 @@ if uploaded_file is not None:
             header_row_input = st.number_input("Header Table ada di baris ke:", min_value=1, value=1)
 
         # Baca Data Full
-        df = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=header_row_input - 1)
+        if not is_csv:
+            df = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=header_row_input - 1)
+        else:
+            uploaded_file.seek(0)
+            try:
+                df = pd.read_csv(uploaded_file, header=header_row_input - 1)
+            except:
+                uploaded_file.seek(0)
+                df = pd.read_csv(uploaded_file, header=header_row_input - 1, sep=';')
+            
         df.dropna(how='all', inplace=True)
-        # Konversi awal ke string agar aman
         df = df.astype(str)
         
         st.divider()
@@ -127,34 +159,36 @@ if uploaded_file is not None:
                     placeholder="Pilih kolom NIK, KK, dll..."
                 )
             with col_right:
-                # Checkbox dengan style khusus (sekarang teksnya sudah hitam)
-                use_auto_clean = st.checkbox("Aktifkan Auto-Cleaning (Centang Box disamping kiri)", value=True, help="Otomatis menghapus spasi, titik, strip, dan huruf.")
+                # Default value=False (Tidak dicentang)
+                use_auto_clean = st.checkbox("✅ Aktifkan Auto-Cleaning", value=False, help="Otomatis menghapus spasi, titik, strip, dan huruf.")
 
             if st.button("🚀 Proses & Analisa Data") and target_cols:
-                with st.spinner('Sedang membersihkan dan memproses data...'):
+                with st.spinner('Sedang memproses data...'):
                     df_result = df.copy()
                     log_data_all = {}
                     
-                    # --- LOOPING PROSES ---
                     for col_name in target_cols:
-                        # 1. Pastikan Nan jadi string kosong
                         df_result[col_name] = df_result[col_name].replace('nan', '')
                         
-                        # FITUR AUTO CLEANING
+                        # LOGIC AUTO CLEANING
                         if use_auto_clean:
+                            # 1. Hapus akhiran .0
+                            df_result[col_name] = df_result[col_name].str.replace(r'\.0$', '', regex=True)
+                            # 2. Hapus non-angka
                             df_result[col_name] = df_result[col_name].str.replace(r'\D', '', regex=True)
                         else:
+                            # Jika tidak dicentang, hanya trim spasi biasa
                             df_result[col_name] = df_result[col_name].str.strip()
                         
-                        # 2. Hitung Duplikasi
+                        # Hitung Duplikasi
                         temp_count_col = f"__temp_count_{col_name}"
                         df_result[temp_count_col] = df_result.groupby(col_name).cumcount() + 1
                         
-                        # 3. Logika Validasi
+                        # Logika Validasi
                         def cek_validitas(row, c_name, c_temp):
                             val = row[c_name]
                             count = row[c_temp]
-                            val = val.replace('.0', '').strip()
+                            val = val.replace('.0', '').strip() 
                             
                             if len(val) == 0: return "KOSONG"
                             elif len(val) != 16: return "TIDAK 16 DIGIT"
@@ -215,11 +249,17 @@ if uploaded_file is not None:
                                 fig_bar.update_traces(textposition='outside')
                                 st.plotly_chart(fig_bar, use_container_width=True)
 
-                    # TABEL & DOWNLOAD
+                    # DOWNLOAD
                     st.divider()
-                    st.subheader("📋 Tabel Data (Sudah Dibersihkan)")
+                    st.subheader("📋 Tabel Data")
                     st.dataframe(df_result, use_container_width=True)
                     
+                    # Bersihkan nama file agar tidak dobel ekstensi (misal .xls.xlsx)
+                    clean_filename = uploaded_file.name
+                    if clean_filename.endswith(".xlsx"): clean_filename = clean_filename[:-5]
+                    elif clean_filename.endswith(".xls"): clean_filename = clean_filename[:-4]
+                    elif clean_filename.endswith(".csv"): clean_filename = clean_filename[:-4]
+
                     buffer = io.BytesIO()
                     with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
                         sheet_export = f"Cek_{selected_sheet}"[:30]
@@ -232,9 +272,9 @@ if uploaded_file is not None:
 
                     buffer.seek(0)
                     st.download_button(
-                        label="📥 Download Hasil Bersih & Cek (Excel)",
+                        label="📥 Download Hasil (Excel)",
                         data=buffer,
-                        file_name=f"Cleaned_{selected_sheet}_{uploaded_file.name}",
+                        file_name=f"Result_{clean_filename}.xlsx",
                         mime="application/vnd.ms-excel"
                     )
             
@@ -244,7 +284,6 @@ if uploaded_file is not None:
     except Exception as e:
         st.error(f"Terjadi kesalahan: {e}")
 
-# Sidebar Admin
 with st.sidebar:
     st.header("⚙️ Admin Panel")
     if st.checkbox("Lihat Log Aktivitas"):
