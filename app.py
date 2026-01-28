@@ -50,7 +50,7 @@ st.markdown("""
 }
 </style>
 <div class="footer">
-    Dibuat oleh <strong>RBKA</strong> untuk digunakan internal <strong>Antasena</strong>
+    Dikembangkan oleh <strong>POKJA DATA DAN INFORMASI</strong> untuk digunakan internal <strong>Antasena</strong>
 </div>
 """, unsafe_allow_html=True)
 
@@ -160,7 +160,7 @@ if uploaded_file is not None:
                 )
             with col_right:
                 # Default value=False (Tidak dicentang)
-                use_auto_clean = st.checkbox("✅ Aktifkan Auto-Cleaning", value=False, help="Otomatis menghapus spasi, titik, strip, dan huruf.")
+                use_auto_clean = st.checkbox("Aktifkan Auto-Cleaning", value=False, help="Otomatis menghapus spasi, titik, strip, dan huruf.")
 
             if st.button("🚀 Proses & Analisa Data") and target_cols:
                 with st.spinner('Sedang memproses data...'):
