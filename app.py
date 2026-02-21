@@ -144,6 +144,11 @@ if uploaded_file is not None:
         df.dropna(how='all', inplace=True)
         df = df.astype(str)
         
+        # Cleansing global: sapu bersih efek konversi float pandas di SEMUA kolom
+        for col in df.columns:
+            df[col] = df[col].replace('nan', '')
+            df[col] = df[col].str.replace(r'\.0$', '', regex=True)
+        
         st.divider()
         st.subheader("2. Pilih Kolom Data")
         cols = df.columns.tolist()
