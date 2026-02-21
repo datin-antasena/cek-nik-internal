@@ -193,7 +193,7 @@ if uploaded_file is not None:
                             if len(val) == 0: return "KOSONG"
                             elif len(val) != 16: return "TIDAK 16 DIGIT"
                             elif not val.isdigit(): return "BUKAN ANGKA"
-                            elif val.endswith("00"): return "TERKONVERSI (00)"
+                            elif val.endswith("000"): return "TERKONVERSI (000)"
                             elif count == 1: return "UNIK"
                             else: return f"GANDA {count}"
 
@@ -238,7 +238,7 @@ if uploaded_file is not None:
                                 "GANDA": "#dc3545",
                                 "BUKAN ANGKA": "#ffc107",
                                 "TIDAK 16 DIGIT": "#fd7e14",
-                                "TERKONVERSI (00)": "#17a2b8",
+                                "TERKONVERSI (000)": "#17a2b8",
                                 "KOSONG": "#6c757d"
                             }
                             with col_grafik1:
