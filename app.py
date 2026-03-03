@@ -133,6 +133,12 @@ if uploaded_file is not None:
 
         with col_header_row:
             header_row_input = st.number_input("Header Table ada di baris ke:", min_value=1, value=1)
+            # FITUR BARU: Hapus baris penomoran (1, 2, 3...)
+            hapus_baris_penomoran = st.checkbox(
+                "Abaikan baris nomor kolom (1, 2, 3...)", 
+                value=True, 
+                help="Otomatis membuang 1 baris tepat di bawah header jika isinya hanya urutan angka kolom."
+            )
 
         # Baca Data Full
         if not is_csv:
@@ -146,6 +152,11 @@ if uploaded_file is not None:
                 df = pd.read_csv(uploaded_file, header=header_row_input - 1, sep=';')
             
         df.dropna(how='all', inplace=True)
+        
+        # Eksekusi penghapusan baris penomoran jika dicentang
+        if hapus_baris_penomoran and not df.empty:
+            df = df.iloc[1:].reset_index(drop=True)
+            
         df = df.astype(str)
         
         # Cleansing global: sapu bersih efek konversi float pandas di SEMUA kolom
@@ -168,7 +179,6 @@ if uploaded_file is not None:
                     placeholder="Pilih kolom NIK, KK, dll..."
                 )
             with col_right:
-                # Default value=False (Tidak dicentang)
                 use_auto_clean = st.checkbox("Aktifkan Auto-Cleaning", value=False, help="Otomatis menghapus spasi, titik, strip, dan huruf.")
 
             # BLOK TOMBOL PROSES -> Hanya menyimpan ke Session State
@@ -182,12 +192,9 @@ if uploaded_file is not None:
                         
                         # LOGIC AUTO CLEANING
                         if use_auto_clean:
-                            # 1. Hapus akhiran .0
                             df_result[col_name] = df_result[col_name].str.replace(r'\.0$', '', regex=True)
-                            # 2. Hapus non-angka
                             df_result[col_name] = df_result[col_name].str.replace(r'\D', '', regex=True)
                         else:
-                            # Jika tidak dicentang, hanya trim spasi biasa
                             df_result[col_name] = df_result[col_name].str.strip()
                         
                         # Hitung Duplikasi
@@ -218,7 +225,6 @@ if uploaded_file is not None:
 
                     catat_log(uploaded_file.name, selected_sheet, log_data_all)
                     
-                    # Simpan hasil proses ke Session State
                     st.session_state.df_result = df_result
                     st.session_state.target_cols_saved = target_cols
                     st.session_state.is_processed = True
@@ -226,7 +232,7 @@ if uploaded_file is not None:
             elif not target_cols and uploaded_file:
                 st.warning("⚠️ Silakan pilih minimal 1 kolom dulu.")
 
-            # BLOK TAMPILAN -> Mengambil data dari Session State (tetap muncul meski tombol tidak diklik ulang)
+            # BLOK TAMPILAN -> Mengambil data dari Session State
             if st.session_state.get('is_processed') and st.session_state.get('target_cols_saved') == target_cols:
                 df_result = st.session_state.df_result
                 
@@ -293,7 +299,6 @@ if uploaded_file is not None:
                 st.dataframe(df_display, use_container_width=True)
                 
                 # DOWNLOAD
-                # Bersihkan nama file agar tidak dobel ekstensi (misal .xls.xlsx)
                 clean_filename = uploaded_file.name
                 if clean_filename.endswith(".xlsx"): clean_filename = clean_filename[:-5]
                 elif clean_filename.endswith(".xls"): clean_filename = clean_filename[:-4]
