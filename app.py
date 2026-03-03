@@ -76,6 +76,10 @@ def catat_log(nama_file, nama_sheet, rincian_per_kolom):
     with open("activity_log.txt", "a") as f:
         f.write(pesan)
 
+# --- INIT SESSION STATE ---
+if 'is_processed' not in st.session_state:
+    st.session_state.is_processed = False
+
 # --- 4. APLIKASI UTAMA ---
 st.title("📊 Dashboard Validasi Data NIK/NKK - Internal Antasena")
 st.info("Fitur: Atur Posisi Header, Multi-Kolom, Multi-Sheet, Auto Cleansing, Visualisasi, & Auto-Format Text.")
@@ -167,6 +171,7 @@ if uploaded_file is not None:
                 # Default value=False (Tidak dicentang)
                 use_auto_clean = st.checkbox("Aktifkan Auto-Cleaning", value=False, help="Otomatis menghapus spasi, titik, strip, dan huruf.")
 
+            # BLOK TOMBOL PROSES -> Hanya menyimpan ke Session State
             if st.button("🚀 Proses & Analisa Data") and target_cols:
                 with st.spinner('Sedang memproses data...'):
                     df_result = df.copy()
@@ -212,101 +217,105 @@ if uploaded_file is not None:
                         log_data_all[col_name] = counts
 
                     catat_log(uploaded_file.name, selected_sheet, log_data_all)
-
-                    # DASHBOARD
-                    st.divider()
-                    st.subheader("📊 Hasil Analisa Visual")
-                    tabs = st.tabs([f"Analisa: {c}" for c in target_cols])
                     
-                    for i, col_name in enumerate(target_cols):
-                        with tabs[i]:
-                            status_col = f"STATUS_{col_name}"
-                            viz_series = df_result[status_col].apply(
-                                lambda x: "GANDA" if str(x).startswith("GANDA") else x
-                            )
-                            data_counts = viz_series.value_counts().reset_index()
-                            data_counts.columns = ['Status', 'Jumlah']
-                            
-                            total_data = len(df_result)
-                            total_unik = len(df_result[df_result[status_col] == 'UNIK'])
-                            total_masalah = total_data - total_unik
-                            
-                            m1, m2, m3 = st.columns(3)
-                            m1.metric("Total Data", total_data)
-                            m2.metric("Data Valid (UNIK)", total_unik)
-                            m3.metric("Data Perlu Perbaikan", total_masalah, delta_color="inverse")
-                            
-                            st.markdown("---")
-                            col_grafik1, col_grafik2 = st.columns(2)
-                            color_map = {
-                                "UNIK": "#28a745",
-                                "GANDA": "#dc3545",
-                                "BUKAN ANGKA": "#ffc107",
-                                "TIDAK 16 DIGIT": "#fd7e14",
-                                "TERKONVERSI (000)": "#17a2b8",
-                                "KOSONG": "#6c757d"
-                            }
-                            with col_grafik1:
-                                fig_pie = px.pie(data_counts, values='Jumlah', names='Status', title=f'Persentase: {col_name}', color='Status', color_discrete_map=color_map, hole=0.4)
-                                st.plotly_chart(fig_pie, use_container_width=True)
-                            with col_grafik2:
-                                fig_bar = px.bar(data_counts, x='Status', y='Jumlah', title=f'Jumlah Error: {col_name}', color='Status', color_discrete_map=color_map, text='Jumlah')
-                                fig_bar.update_traces(textposition='outside')
-                                st.plotly_chart(fig_bar, use_container_width=True)
+                    # Simpan hasil proses ke Session State
+                    st.session_state.df_result = df_result
+                    st.session_state.target_cols_saved = target_cols
+                    st.session_state.is_processed = True
 
-                    # DOWNLOAD
-                    # DOWNLOAD
-                    st.divider()
-                    st.subheader("📋 Tabel Data")
-                    
-                    # Bikin copy khusus untuk UI agar data hasil download tetap utuh
-                    df_display = df_result.copy()
-                    
-                    # Bikin layout kolom dinamis menyesuaikan jumlah target_cols
-                    filter_cols = st.columns(len(target_cols))
-                    
-                    # Loop untuk bikin dropdown filter per status kolom
-                    for idx, col_name in enumerate(target_cols):
-                        status_col = f"STATUS_{col_name}"
-                        with filter_cols[idx]:
-                            list_status = df_result[status_col].unique().tolist()
-                            pilihan_status = st.multiselect(
-                                f"Filter {status_col}:",
-                                options=list_status,
-                                default=list_status
-                            )
-                            # Terapkan filter ke dataframe display
-                            df_display = df_display[df_display[status_col].isin(pilihan_status)]
-                            
-                    st.caption(f"Menampilkan {len(df_display)} dari total {len(df_result)} baris data.")
-                    st.dataframe(df_display, use_container_width=True)
-                                        
-                    # Bersihkan nama file agar tidak dobel ekstensi (misal .xls.xlsx)
-                    clean_filename = uploaded_file.name
-                    if clean_filename.endswith(".xlsx"): clean_filename = clean_filename[:-5]
-                    elif clean_filename.endswith(".xls"): clean_filename = clean_filename[:-4]
-                    elif clean_filename.endswith(".csv"): clean_filename = clean_filename[:-4]
-
-                    buffer = io.BytesIO()
-                    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                        sheet_export = f"Cek_{selected_sheet}"[:30]
-                        df_result.to_excel(writer, index=False, sheet_name=sheet_export)
-                        wb = writer.book
-                        ws = writer.sheets[sheet_export]
-                        txt_fmt = wb.add_format({'num_format': '@'})
-                        for idx, col in enumerate(df_result.columns):
-                            ws.set_column(idx, idx, 25, txt_fmt)
-
-                    buffer.seek(0)
-                    st.download_button(
-                        label="📥 Download Hasil (Excel)",
-                        data=buffer,
-                        file_name=f"Result_{clean_filename}.xlsx",
-                        mime="application/vnd.ms-excel"
-                    )
-            
             elif not target_cols and uploaded_file:
                 st.warning("⚠️ Silakan pilih minimal 1 kolom dulu.")
+
+            # BLOK TAMPILAN -> Mengambil data dari Session State (tetap muncul meski tombol tidak diklik ulang)
+            if st.session_state.get('is_processed') and st.session_state.get('target_cols_saved') == target_cols:
+                df_result = st.session_state.df_result
+                
+                # DASHBOARD
+                st.divider()
+                st.subheader("📊 Hasil Analisa Visual")
+                tabs = st.tabs([f"Analisa: {c}" for c in target_cols])
+                
+                for i, col_name in enumerate(target_cols):
+                    with tabs[i]:
+                        status_col = f"STATUS_{col_name}"
+                        viz_series = df_result[status_col].apply(
+                            lambda x: "GANDA" if str(x).startswith("GANDA") else x
+                        )
+                        data_counts = viz_series.value_counts().reset_index()
+                        data_counts.columns = ['Status', 'Jumlah']
+                        
+                        total_data = len(df_result)
+                        total_unik = len(df_result[df_result[status_col] == 'UNIK'])
+                        total_masalah = total_data - total_unik
+                        
+                        m1, m2, m3 = st.columns(3)
+                        m1.metric("Total Data", total_data)
+                        m2.metric("Data Valid (UNIK)", total_unik)
+                        m3.metric("Data Perlu Perbaikan", total_masalah, delta_color="inverse")
+                        
+                        st.markdown("---")
+                        col_grafik1, col_grafik2 = st.columns(2)
+                        color_map = {
+                            "UNIK": "#28a745",
+                            "GANDA": "#dc3545",
+                            "BUKAN ANGKA": "#ffc107",
+                            "TIDAK 16 DIGIT": "#fd7e14",
+                            "TERKONVERSI (000)": "#17a2b8",
+                            "KOSONG": "#6c757d"
+                        }
+                        with col_grafik1:
+                            fig_pie = px.pie(data_counts, values='Jumlah', names='Status', title=f'Persentase: {col_name}', color='Status', color_discrete_map=color_map, hole=0.4)
+                            st.plotly_chart(fig_pie, use_container_width=True)
+                        with col_grafik2:
+                            fig_bar = px.bar(data_counts, x='Status', y='Jumlah', title=f'Jumlah Error: {col_name}', color='Status', color_discrete_map=color_map, text='Jumlah')
+                            fig_bar.update_traces(textposition='outside')
+                            st.plotly_chart(fig_bar, use_container_width=True)
+
+                # FILTER DAN TABEL
+                st.divider()
+                st.subheader("📋 Tabel Data")
+                
+                df_display = df_result.copy()
+                filter_cols = st.columns(len(target_cols))
+                
+                for idx, col_name in enumerate(target_cols):
+                    status_col = f"STATUS_{col_name}"
+                    with filter_cols[idx]:
+                        list_status = df_result[status_col].unique().tolist()
+                        pilihan_status = st.multiselect(
+                            f"Filter {status_col}:",
+                            options=list_status,
+                            default=list_status
+                        )
+                        df_display = df_display[df_display[status_col].isin(pilihan_status)]
+                        
+                st.caption(f"Menampilkan {len(df_display)} dari total {len(df_result)} baris data.")
+                st.dataframe(df_display, use_container_width=True)
+                
+                # DOWNLOAD
+                # Bersihkan nama file agar tidak dobel ekstensi (misal .xls.xlsx)
+                clean_filename = uploaded_file.name
+                if clean_filename.endswith(".xlsx"): clean_filename = clean_filename[:-5]
+                elif clean_filename.endswith(".xls"): clean_filename = clean_filename[:-4]
+                elif clean_filename.endswith(".csv"): clean_filename = clean_filename[:-4]
+
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                    sheet_export = f"Cek_{selected_sheet}"[:30]
+                    df_result.to_excel(writer, index=False, sheet_name=sheet_export)
+                    wb = writer.book
+                    ws = writer.sheets[sheet_export]
+                    txt_fmt = wb.add_format({'num_format': '@'})
+                    for idx, col in enumerate(df_result.columns):
+                        ws.set_column(idx, idx, 25, txt_fmt)
+
+                buffer.seek(0)
+                st.download_button(
+                    label="📥 Download Hasil Seluruhnya (Excel)",
+                    data=buffer,
+                    file_name=f"Result_{clean_filename}.xlsx",
+                    mime="application/vnd.ms-excel"
+                )
                 
     except Exception as e:
         st.error(f"Terjadi kesalahan: {e}")
