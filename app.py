@@ -255,10 +255,32 @@ if uploaded_file is not None:
                                 st.plotly_chart(fig_bar, use_container_width=True)
 
                     # DOWNLOAD
+                    # DOWNLOAD
                     st.divider()
                     st.subheader("📋 Tabel Data")
-                    st.dataframe(df_result, use_container_width=True)
                     
+                    # Bikin copy khusus untuk UI agar data hasil download tetap utuh
+                    df_display = df_result.copy()
+                    
+                    # Bikin layout kolom dinamis menyesuaikan jumlah target_cols
+                    filter_cols = st.columns(len(target_cols))
+                    
+                    # Loop untuk bikin dropdown filter per status kolom
+                    for idx, col_name in enumerate(target_cols):
+                        status_col = f"STATUS_{col_name}"
+                        with filter_cols[idx]:
+                            list_status = df_result[status_col].unique().tolist()
+                            pilihan_status = st.multiselect(
+                                f"Filter {status_col}:",
+                                options=list_status,
+                                default=list_status
+                            )
+                            # Terapkan filter ke dataframe display
+                            df_display = df_display[df_display[status_col].isin(pilihan_status)]
+                            
+                    st.caption(f"Menampilkan {len(df_display)} dari total {len(df_result)} baris data.")
+                    st.dataframe(df_display, use_container_width=True)
+                                        
                     # Bersihkan nama file agar tidak dobel ekstensi (misal .xls.xlsx)
                     clean_filename = uploaded_file.name
                     if clean_filename.endswith(".xlsx"): clean_filename = clean_filename[:-5]
