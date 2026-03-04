@@ -3,6 +3,35 @@ import pandas as pd
 import io
 import plotly.express as px
 from datetime import datetime
+import gspread
+from google.oauth2.service_account import Credentials
+
+# Fungsi ini di-cache agar aplikasi tidak menarik data berulang kali dari Google API
+@st.cache_data(ttl=3600) 
+def ambil_data_salur_gspread():
+    try:
+        # Mengambil rahasia dari Streamlit secrets
+        scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+        creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
+        client = gspread.authorize(creds)
+        
+        # GANTI DENGAN ID SPREADSHEET KAMU (Ambil dari URL Google Sheets)
+        sheet_id = st.secrets["SPREADSHEET_ID"] 
+        
+        # Panggil nama sheet secara spesifik
+        sheet = client.open_by_key(sheet_id).worksheet("BNBA")
+        
+        # Tarik kolom ke-4 (gspread menggunakan basis angka 1)
+        kolom_nik = sheet.col_values(4) 
+        
+        # Bersihkan data dan ubah menjadi Set
+        # Asumsi: Baris ke-1 di GSheets adalah judul kolom (header), 
+        # jadi kita buang menggunakan slice [1:]
+        set_nik_salur = set(str(nik).strip() for nik in kolom_nik[1:] if nik)
+        return set_nik_salur
+    except Exception as e:
+        st.error(f"Gagal mengambil data dari Google Sheets: {e}")
+        return set()
 
 # --- 1. KONFIGURASI HALAMAN ---
 st.set_page_config(page_title="Dashboard Validasi NIK/NKK Antasena", layout="wide")
@@ -183,9 +212,26 @@ if uploaded_file is not None:
 
             # BLOK TOMBOL PROSES -> Hanya menyimpan ke Session State
             if st.button("🚀 Proses & Analisa Data") and target_cols:
-                with st.spinner('Sedang memproses data...'):
+                with st.spinner('Menghubungkan ke server & memproses data...'):
                     df_result = df.copy()
                     log_data_all = {}
+                    
+                    # Panggil data eksternal
+                    set_salur_2026 = ambil_data_salur_gspread()
+                    
+                    # Definisikan fungsi DI SINI, sebelum digunakan
+                    def cek_validitas(row, c_name, c_temp, referensi_salur):
+                        val = row[c_name]
+                        count = row[c_temp]
+                        val = str(val).replace('.0', '').strip() 
+
+                        if len(val) == 0: return "KOSONG"
+                        elif len(val) != 16: return "TIDAK 16 DIGIT"
+                        elif not val.isdigit(): return "BUKAN ANGKA"
+                        elif val.endswith("000"): return "TERKONVERSI (000)"
+                        elif val in referensi_salur: return "SUDAH SALUR 2026"
+                        elif count == 1: return "UNIK"
+                        else: return f"GANDA {count}"
                     
                     for col_name in target_cols:
                         df_result[col_name] = df_result[col_name].replace('nan', '')
@@ -197,27 +243,21 @@ if uploaded_file is not None:
                         else:
                             df_result[col_name] = df_result[col_name].str.strip()
                         
-                        # Hitung Duplikasi
                         temp_count_col = f"__temp_count_{col_name}"
                         df_result[temp_count_col] = df_result.groupby(col_name).cumcount() + 1
                         
-                        # Logika Validasi
-                        def cek_validitas(row, c_name, c_temp):
-                            val = row[c_name]
-                            count = row[c_temp]
-                            val = val.replace('.0', '').strip() 
-                            
-                            if len(val) == 0: return "KOSONG"
-                            elif len(val) != 16: return "TIDAK 16 DIGIT"
-                            elif not val.isdigit(): return "BUKAN ANGKA"
-                            elif val.endswith("000"): return "TERKONVERSI (000)"
-                            elif count == 1: return "UNIK"
-                            else: return f"GANDA {count}"
-
                         result_col_name = f"STATUS_{col_name}"
-                        df_result[result_col_name] = df_result.apply(
-                            lambda row: cek_validitas(row, col_name, temp_count_col), axis=1
-                        )
+                        
+                        # Eksekusi pengecekan silang
+                        if "NIK" in col_name.upper():
+                            df_result[result_col_name] = df_result.apply(
+                                lambda row: cek_validitas(row, col_name, temp_count_col, set_salur_2026), axis=1
+                            )
+                        else:
+                            df_result[result_col_name] = df_result.apply(
+                                lambda row: cek_validitas(row, col_name, temp_count_col, set()), axis=1
+                            )
+                        
                         df_result.drop(columns=[temp_count_col], inplace=True)
                         
                         counts = df_result[result_col_name].value_counts().to_dict()
@@ -267,7 +307,8 @@ if uploaded_file is not None:
                             "BUKAN ANGKA": "#ffc107",
                             "TIDAK 16 DIGIT": "#fd7e14",
                             "TERKONVERSI (000)": "#17a2b8",
-                            "KOSONG": "#6c757d"
+                            "KOSONG": "#6c757d",
+                            "SUDAH SALUR 2026": "#6f42c1" 
                         }
                         with col_grafik1:
                             fig_pie = px.pie(data_counts, values='Jumlah', names='Status', title=f'Persentase: {col_name}', color='Status', color_discrete_map=color_map, hole=0.4)

@@ -4,3 +4,5 @@ openpyxl
 xlsxwriter
 plotly
 xlrd
+gspread
+google-auth
