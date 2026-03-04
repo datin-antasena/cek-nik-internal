@@ -133,10 +133,10 @@ if uploaded_file is not None:
 
         with col_header_row:
             header_row_input = st.number_input("Header Table ada di baris ke:", min_value=1, value=1)
-            # FITUR BARU: Hapus baris penomoran (1, 2, 3...)
+            # FITUR BARU: Hapus baris penomoran.
             hapus_baris_penomoran = st.checkbox(
-                "Abaikan baris nomor kolom (1, 2, 3...)", 
-                value=True, 
+                "Abaikan baris nomor kolom (1, 2, 3...) Membuang 1 baris dibawah header bila terdapat urutan angka kolom", 
+                value=False, 
                 help="Otomatis membuang 1 baris tepat di bawah header jika isinya hanya urutan angka kolom."
             )
 
