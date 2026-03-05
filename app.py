@@ -113,7 +113,7 @@ if 'is_processed' not in st.session_state:
 st.title("📊 Dashboard Validasi Data NIK/NKK - Internal Antasena")
 st.info("Fitur: Atur Posisi Header, Multi-Kolom, Multi-Sheet, Auto Cleansing, Visualisasi, & Auto-Format Text.")
 
-uploaded_file = st.file_uploader("Upload file Excel/CSV", type=["xlsx", "xls", "csv"])
+uploaded_file = st.file_uploader("Upload file Excel/CSV", type=["xlsx", "xls", "xlsm" , "csv"])
 
 if uploaded_file is not None:
     try:
@@ -342,6 +342,7 @@ if uploaded_file is not None:
                 # DOWNLOAD
                 clean_filename = uploaded_file.name
                 if clean_filename.endswith(".xlsx"): clean_filename = clean_filename[:-5]
+                elif clean_filename.endswith(".xlsm"): clean_filename = clean_filename[:-5]
                 elif clean_filename.endswith(".xls"): clean_filename = clean_filename[:-4]
                 elif clean_filename.endswith(".csv"): clean_filename = clean_filename[:-4]
 
@@ -359,7 +360,7 @@ if uploaded_file is not None:
                 st.download_button(
                     label="📥 Download Hasil Seluruhnya (Excel)",
                     data=buffer,
-                    file_name=f"Result_{clean_filename}.xlsx",
+                    file_name=f"Hasilcek_{clean_filename}.xlsx",
                     mime="application/vnd.ms-excel"
                 )
                 
