@@ -226,7 +226,7 @@ def buat_excel_buffer(df_result, selected_sheet):
 
 
 def bersihkan_nama_file(nama):
-    for ext in (".xlsx", ".xls", ".csv"):
+    for ext in (".xlsx", ".xlsm", ".xls", ".csv"):
         if nama.endswith(ext):
             return nama[: -len(ext)]
     return nama
@@ -267,7 +267,7 @@ def baca_preview_mentah(uploaded_file, selected_sheet, is_csv):
             uploaded_file.seek(0)
             return pd.read_csv(uploaded_file, header=None, nrows=10, sep=";")
     else:
-        return pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=None, nrows=10)
+        return pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=None, nrows=10, engine="openpyxl")
 
 
 def baca_data_penuh(uploaded_file, selected_sheet, is_csv, header_row_input):
@@ -280,7 +280,7 @@ def baca_data_penuh(uploaded_file, selected_sheet, is_csv, header_row_input):
             uploaded_file.seek(0)
             return pd.read_csv(uploaded_file, header=header_idx, sep=";")
     else:
-        return pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=header_idx)
+        return pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=header_idx, engine="openpyxl")
 
 
 # ─── MAIN ─────────────────────────────────────────────────────────────────────
@@ -297,7 +297,7 @@ def main():
         st.session_state.is_processed = False
 
     # ── Upload ──
-    uploaded_file = st.file_uploader("Upload file Excel/CSV", type=["xlsx", "xls", "csv"])
+    uploaded_file = st.file_uploader("Upload file Excel/CSV", type=["xlsx", "xlsm", "xls", "csv"])
     if uploaded_file is None:
         st.write("<br><br><br>", unsafe_allow_html=True)
         return
@@ -308,7 +308,7 @@ def main():
         if is_csv:
             daftar_sheet = ["Sheet1"]
         else:
-            xls = pd.ExcelFile(uploaded_file)
+            xls = pd.ExcelFile(uploaded_file, engine="openpyxl")
             daftar_sheet = xls.sheet_names
 
         # ── Konfigurasi File ──
