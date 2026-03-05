@@ -1,5 +1,6 @@
 import io
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import gspread
 import pandas as pd
@@ -76,7 +77,7 @@ def ambil_data_salur_gspread():
 
         kolom_nik = sheet.col_values(4)
         set_nik_salur = {str(nik).strip() for nik in kolom_nik[1:] if nik}
-        waktu_update = datetime.now().strftime("%d %b %Y, %H:%M:%S")
+        waktu_update = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%d %b %Y, %H:%M:%S WIB")
 
         return set_nik_salur, waktu_update
 
