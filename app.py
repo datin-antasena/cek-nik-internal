@@ -88,7 +88,7 @@ def ambil_data_salur_gspread():
 # ─── LOGGING ──────────────────────────────────────────────────────────────────
 
 def catat_log(nama_file, nama_sheet, rincian_per_kolom):
-    waktu = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    waktu = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M:%S")
     summary_text = ""
 
     for col, stats in rincian_per_kolom.items():
