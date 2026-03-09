@@ -326,7 +326,8 @@ def proses_kolom_usia(df_result, col_tgl_lahir, tgl_pengecekan, dayfirst: bool =
 
     hasil = df_result[col_tgl_lahir].apply(_parse_row)
     df_result[usia_col]     = hasil.apply(lambda x: x[0])
-    df_result[kategori_col] = hasil.apply(lambda x: x[1] if x[1] else "TIDAK VALID")    df_result[parsed_col]   = hasil.apply(lambda x: x[2])
+    df_result[kategori_col] = hasil.apply(lambda x: x[1] if x[1] else "TIDAK VALID")
+    df_result[parsed_col]   = hasil.apply(lambda x: x[2])
     df_result[catatan_col]  = hasil.apply(lambda x: x[3])
 
     return df_result, usia_col, kategori_col, parsed_col, catatan_col
