@@ -207,8 +207,10 @@ _FORMATS_PASTI = [
 ]
 
 # Format-format ambigu yang butuh petunjuk dari user (dayfirst vs monthfirst)
-_FORMATS_AMBIGU_DAYFIRST   = ["%d/%m/%Y", "%d-%m-%Y", "%d/%m/%y", "%d-%m-%y", "%d %m %Y", "%d %m %y"]
-_FORMATS_AMBIGU_MONTHFIRST = ["%m/%d/%Y", "%m-%d-%Y", "%m/%d/%y", "%m-%d-%y", "%m %d %Y", "%m %d %y"]
+_FORMATS_AMBIGU_DAYFIRST   = ["%d/%m/%Y", "%d-%m-%Y", "%d/%m/%y", "%d-%m-%y", "%d %m %Y", "%d %m %y",
+                               "%d|%m|%Y", "%d|%m|%y"]
+_FORMATS_AMBIGU_MONTHFIRST = ["%m/%d/%Y", "%m-%d-%Y", "%m/%d/%y", "%m-%d-%y", "%m %d %Y", "%m %d %y",
+                               "%m|%d|%Y", "%m|%d|%y"]
 
 
 def _angka_bagian(tgl_str: str):
@@ -310,22 +312,21 @@ def proses_kolom_usia(df_result, col_tgl_lahir, tgl_pengecekan, dayfirst: bool =
     def _parse_row(x):
         tgl, is_ambigu = _parse_tanggal(str(x), dayfirst=dayfirst)
         if tgl is None:
-            return None, None, "❌ Tidak dikenali", "❌ Format tidak dikenali"
+            return None, None, "TIDAK DIKENALI", "Format tidak dikenali"
         if tgl > tgl_pengecekan:
-            return None, None, "❌ Tgl di masa depan", "❌ Tanggal di masa depan"
+            return None, None, "TIDAK DIKENALI", "Tanggal di masa depan"
         usia = (
             tgl_pengecekan.year - tgl.year
             - ((tgl_pengecekan.month, tgl_pengecekan.day) < (tgl.month, tgl.day))
         )
         if usia > 130:
-            return None, None, "❌ Usia tidak realistis", "❌ Usia > 130 tahun"
-        catatan = "⚠️ Ambigu (dd/mm atau mm/dd?)" if is_ambigu else "✅ OK"
+            return None, None, "TIDAK DIKENALI", "Usia > 130 tahun"
+        catatan = "Ambigu (dd/mm atau mm/dd?)" if is_ambigu else "OK"
         return usia, tentukan_kategori_umur(usia), tgl.strftime("%d/%m/%Y"), catatan
 
     hasil = df_result[col_tgl_lahir].apply(_parse_row)
     df_result[usia_col]     = hasil.apply(lambda x: x[0])
-    df_result[kategori_col] = hasil.apply(lambda x: x[1] if x[1] else "TIDAK VALID")
-    df_result[parsed_col]   = hasil.apply(lambda x: x[2])
+    df_result[kategori_col] = hasil.apply(lambda x: x[1] if x[1] else "TIDAK VALID")    df_result[parsed_col]   = hasil.apply(lambda x: x[2])
     df_result[catatan_col]  = hasil.apply(lambda x: x[3])
 
     return df_result, usia_col, kategori_col, parsed_col, catatan_col
@@ -425,7 +426,7 @@ def render_charts_kategori_umur(df_result, kategori_col, col_tgl_lahir, usia_col
         st.plotly_chart(fig_hist, use_container_width=True)
 
     # Tampilkan baris yang gagal di-parse agar bisa diverifikasi
-    df_gagal = df_result[df_result[parsed_col].str.startswith("❌", na=False)]
+    df_gagal = df_result[df_result[parsed_col] == "TIDAK DIKENALI"]
     if not df_gagal.empty:
         with st.expander(f"⚠️ {len(df_gagal)} baris tanggal tidak berhasil di-parse — klik untuk lihat detail", expanded=False):
             st.caption("Baris berikut tidak dapat dikenali formatnya. Silakan perbaiki secara manual.")
@@ -435,7 +436,7 @@ def render_charts_kategori_umur(df_result, kategori_col, col_tgl_lahir, usia_col
             )
 
     # Tampilkan baris yang ambigu (angka pertama ≤ 12, bisa dd atau mm)
-    df_ambigu = df_result[df_result[catatan_col] == "⚠️ Ambigu (dd/mm atau mm/dd?)"]
+    df_ambigu = df_result[df_result[catatan_col] == "Ambigu (dd/mm atau mm/dd?)"]
     if not df_ambigu.empty:
         with st.expander(
             f"🔍 {len(df_ambigu)} baris berformat ambigu (angka pertama ≤ 12) — klik untuk verifikasi",
