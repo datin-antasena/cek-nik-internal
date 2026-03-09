@@ -6,3 +6,4 @@ plotly
 xlrd
 gspread
 google-auth
+python-dateutil

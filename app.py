@@ -165,6 +165,37 @@ def proses_kolom(df_result, col_name, use_auto_clean, referensi_salur):
 
 import re as _re
 from datetime import timedelta as _timedelta
+from difflib import get_close_matches as _get_close_matches
+
+# Mapping nama bulan Indonesia → Inggris untuk parsing
+_BULAN_ID = {
+    "januari": "January", "februari": "February", "maret": "March",
+    "april": "April", "mei": "May", "juni": "June",
+    "juli": "July", "agustus": "August", "september": "September",
+    "oktober": "October", "november": "November", "desember": "December",
+}
+
+def _ganti_bulan_id(tgl_str: str) -> str:
+    """
+    Ganti nama bulan Indonesia ke Inggris.
+    Mendukung typo ringan (contoh: 'agistis' → 'agustus') via fuzzy matching.
+    """
+    # Cari kata yang mungkin nama bulan (3+ huruf, bukan angka)
+    kata_list = _re.findall(r"[a-zA-Z]{3,}", tgl_str)
+    hasil = tgl_str
+    for kata in kata_list:
+        kata_lower = kata.lower()
+        # Cek exact match dulu
+        if kata_lower in _BULAN_ID:
+            hasil = _re.sub(kata, _BULAN_ID[kata_lower], hasil, flags=_re.IGNORECASE)
+        else:
+            # Fuzzy match: cutoff lebih tinggi untuk kata pendek (≤5 huruf) 
+            # agar tidak salah cocok (misal "pria" → "april")
+            cutoff = 0.75 if len(kata_lower) <= 5 else 0.6
+            cocok = _get_close_matches(kata_lower, _BULAN_ID.keys(), n=1, cutoff=cutoff)
+            if cocok:
+                hasil = _re.sub(kata, _BULAN_ID[cocok[0]], hasil, flags=_re.IGNORECASE)
+    return hasil
 
 # Format-format non-ambigu: urutan komponen sudah jelas
 _FORMATS_PASTI = [
@@ -197,6 +228,9 @@ def _parse_tanggal(tgl_str: str, dayfirst: bool = True) -> tuple[datetime | None
     tgl_str = tgl_str.strip()
     if not tgl_str or tgl_str.lower() in ("nan", "none", "-", ""):
         return None, False
+
+    # ── 0. Konversi nama bulan Indonesia → Inggris ──────────────────────────
+    tgl_str = _ganti_bulan_id(tgl_str)
 
     # ── 1. Serial Excel ─────────────────────────────────────────────────────
     if tgl_str.isdigit() and 10000 < int(tgl_str) < 60000:
