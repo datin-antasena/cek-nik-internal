@@ -348,11 +348,11 @@ def render_charts_kategori_umur(df_result, kategori_col, col_tgl_lahir, usia_col
     jml_invalid = (df_result[kategori_col] == "TIDAK VALID").sum()
 
     m1, m2, m3, m4, m5 = st.columns(5)
-    m1.metric("Total Data",  total)
-    m2.metric("🧒 Anak",     jml_anak)
-    m3.metric("🧑 Dewasa",   jml_dewasa)
-    m4.metric("👴 Lansia",   jml_lansia)
-    m5.metric("❌ Tgl Tidak Valid", jml_invalid)
+    m1.metric("Total Data",       total)
+    m2.metric("Anak",             jml_anak)
+    m3.metric("Dewasa",           jml_dewasa)
+    m4.metric("Lansia",           jml_lansia)
+    m5.metric("Tgl Tidak Valid",  jml_invalid)
 
     st.markdown("---")
     col_pie, col_bar = st.columns(2)
@@ -673,9 +673,9 @@ def main():
 
                 st.info(
                     f"📌 **Aturan Kategorisasi:**\n"
-                    f"- 🧒 **ANAK**: Usia < 18 tahun\n"
-                    f"- 🧑 **DEWASA**: 18 ≤ Usia < 60 tahun\n"
-                    f"- 👴 **LANSIA**: Usia ≥ 60 tahun\n\n"
+                    f"- **ANAK**: Usia < 18 tahun\n"
+                    f"- **DEWASA**: 18 \u2264 Usia < 60 tahun\n"
+                    f"- **LANSIA**: Usia \u2265 60 tahun\n\n"
                     f"Tanggal pengecekan: **{tgl_pengecekan_input.strftime('%d/%m/%Y')}** | "
                     f"Interpretasi ambigu: **{'dd/mm' if dayfirst else 'mm/dd'}**"
                 )
