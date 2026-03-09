@@ -650,6 +650,7 @@ def main():
                 tgl_pengecekan_input = st.date_input(
                     "Tanggal Pengecekan:",
                     value=datetime.now(ZoneInfo("Asia/Jakarta")).date(),
+                    format="DD/MM/YYYY",
                     help="Usia akan dihitung berdasarkan tanggal ini.",
                 )
                 tgl_pengecekan = datetime.combine(tgl_pengecekan_input, datetime.min.time())
