@@ -567,7 +567,7 @@ def baca_data_penuh(uploaded_file, selected_sheet, is_csv, header_row_input):
 
 def main():
     st.markdown(STYLES, unsafe_allow_html=True)
-    st.title("📊 Dashboard Validasi Data NIK/NKK - Internal Antasena")
+    st.title("📊 Dashboard Validasi Data - Internal Antasena")
     st.info("Fitur: Atur Posisi Header, Multi-Kolom, Multi-Sheet, Auto Cleansing, Visualisasi, Auto-Format Text & Kategori Umur.")
 
     set_salur_2026, waktu_tarik = ambil_data_salur_gspread()
