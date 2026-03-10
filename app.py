@@ -13,7 +13,7 @@ from google.oauth2.service_account import Credentials
 
 # ─── CONFIG ───────────────────────────────────────────────────────────────────
 
-st.set_page_config(page_title="Dashboard Validasi NIK/NKK Antasena", layout="wide")
+st.set_page_config(page_title="Dashboard Validasi Data Sentra Antasena", layout="wide")
 
 STYLES = """
 <style>
