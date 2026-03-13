@@ -1,5 +1,7 @@
 import io
-from datetime import datetime, date
+import re as _re
+from datetime import datetime, date, timedelta as _timedelta
+from difflib import get_close_matches as _get_close_matches
 from zoneinfo import ZoneInfo
 
 from dateutil import parser as dateutil_parser
@@ -163,9 +165,6 @@ def proses_kolom(df_result, col_name, use_auto_clean, referensi_salur):
 
 # ─── AGE CATEGORY LOGIC ───────────────────────────────────────────────────────
 
-import re as _re
-from datetime import timedelta as _timedelta
-from difflib import get_close_matches as _get_close_matches
 
 # Mapping nama bulan Indonesia → Inggris untuk parsing
 _BULAN_ID = {
