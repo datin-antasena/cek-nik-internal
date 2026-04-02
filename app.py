@@ -932,39 +932,12 @@ def render_split_page():
             if enable_text_format:
                 auto_detected = _auto_detect_text_columns(all_columns)
                 
-                col_select1, col_select2 = st.columns([1, 4])
-                with col_select1:
-                    select_all = st.button("☑ Select All", use_container_width=True)
-                with col_select2:
-                    deselect_all = st.button("☐ Deselect All", use_container_width=True)
-                
-                st.caption("Pilih kolom yang perlu diformat teks (agar tidak terkonversi):")
-                
-                if "selected_text_columns" not in st.session_state:
-                    st.session_state.selected_text_columns = auto_detected
-                
-                if select_all:
-                    st.session_state.selected_text_columns = set(all_columns)
-                    st.rerun()
-                
-                if deselect_all:
-                    st.session_state.selected_text_columns = set()
-                    st.rerun()
-                
-                cols_per_row = 4
-                cols_grid = st.columns(cols_per_row)
-                checkbox_states = {}
-                
-                for idx, col in enumerate(all_columns):
-                    with cols_grid[idx % cols_per_row]:
-                        is_checked = col in st.session_state.selected_text_columns
-                        checkbox_states[col] = st.checkbox(
-                            f"☐ {col[:20]}{'...' if len(col) > 20 else ''}",
-                            value=is_checked,
-                            key=f"chk_{col}"
-                        )
-                
-                checked_columns = [col for col, checked in checkbox_states.items() if checked]
+                checked_columns = st.multiselect(
+                    "Pilih kolom yang perlu diformat teks (agar tidak terkonversi):",
+                    options=all_columns,
+                    default=list(auto_detected),
+                    help=_get_help_text("select_columns")
+                )
                 
                 if auto_detected:
                     st.caption(f"💡 Tip: {len(auto_detected)} kolom terdeteksi otomatis (mengandung keyword: NIK, KK, NO. HP, TANGGAL, SK, BAST)")
