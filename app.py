@@ -581,7 +581,7 @@ def render_validasi_page():
             header_row_input = st.number_input("Header Table ada di baris ke:", min_value=1, value=1)
             hapus_baris_penomoran = st.checkbox(
                 "Abaikan baris nomor kolom (1, 2, 3...) "
-                "Membuang 1 baris debajo header bila terdapat urutan angka kolom",
+                "Membuang 1 baris di bawah header bila terdapat urutan angka kolom",
                 value=False,
                 help="Otomatis membuang 1 baris tepat di bawah header jika isinya hanya urutan angka kolom.",
             )
@@ -839,7 +839,8 @@ def render_split_page():
     try:
         is_csv = uploaded_file.name.endswith(".csv")
         
-        col_file, col_header = st.columns([3, 1])
+        st.subheader("1. Konfigurasi File")
+        col_file, col_header_row = st.columns([3, 1])
         
         with col_file:
             if not is_csv:
@@ -850,107 +851,82 @@ def render_split_page():
                 selected_sheet = "Sheet1"
                 st.info("File CSV terdeteksi (Hanya 1 Sheet).")
         
-        with col_header:
-            header_row = st.number_input(
-                "🔢 Header Baris:",
+        df_preview_raw = baca_preview_mentah(uploaded_file, selected_sheet, is_csv)
+        df_preview_raw = df_preview_raw.fillna("")
+        
+        with st.expander("🔍 Klik untuk melihat Preview Data Mentah (Cek posisi Header)", expanded=False):
+            st.caption("Baris ke berapa Header tabel Anda?")
+            df_preview_raw.index += 1
+            st.dataframe(df_preview_raw, use_container_width=True)
+        
+        with col_header_row:
+            header_row_input = st.number_input(
+                "Header Table ada di baris ke:",
                 min_value=1,
                 value=1,
                 help=_get_help_text("header_row")
             )
-
+            hapus_baris_penomoran = st.checkbox(
+                "Abaikan baris nomor kolom (1, 2, 3...) "
+                "Membuang 1 baris di bawah header bila terdapat urutan angka kolom",
+                value=False,
+                help="Otomatis membuang 1 baris tepat di bawah header jika isinya hanya urutan angka kolom.",
+            )
+        
+        df_full = baca_data_penuh(uploaded_file, selected_sheet, is_csv, header_row_input)
+        df_full.dropna(how="all", inplace=True)
+        
+        if hapus_baris_penomoran and not df_full.empty:
+            df_full = df_full.iloc[1:].reset_index(drop=True)
+        
+        df_full = df_full.astype(str)
+        for col in df_full.columns:
+            df_full[col] = df_full[col].replace("nan", "").str.replace(r"\.0$", "", regex=True)
+        
         st.divider()
-
-        col_split, col_buttons = st.columns([3, 1])
+        
+        st.subheader("2. Pilih Kolom Split")
+        cols = df_full.columns.tolist()
+        
+        if not cols:
+            st.error("⚠️ Header tidak ditemukan.")
+            return
+        
+        col_split, col_preview = st.columns([3, 1])
         
         with col_split:
-            split_column = st.selectbox(
+            target_split_col = st.selectbox(
                 "📌 Kolom Split:",
-                ["(Pilih kolom setelah klik 'Baca Kolom')"],
+                cols,
                 help=_get_help_text("kolom_split")
             )
         
-        with col_buttons:
+        with col_preview:
             st.write("")
-            col_btn1, col_btn2 = st.columns(2)
-            with col_btn1:
-                btn_read = st.button("📥 Baca Kolom", use_container_width=True)
-            with col_btn2:
-                btn_preview = st.button("👁️ Preview Data", use_container_width=True)
+            if st.button("👁️ Preview Data", use_container_width=True):
+                st.session_state.split_state["df_preview"] = df_full.head(10)
+        
+        if st.session_state.get("split_state", {}).get("df_preview") is not None:
+            with st.expander("👁️ Preview Data (10 Baris Pertama)", expanded=False):
+                st.dataframe(st.session_state.split_state["df_preview"], use_container_width=True)
 
-        if btn_read or st.session_state.split_state["columns_loaded"]:
-            uploaded_file.seek(0)
-            try:
-                if is_csv:
-                    try:
-                        df_temp = pd.read_csv(uploaded_file, header=header_row - 1, nrows=0)
-                    except:
-                        uploaded_file.seek(0)
-                        df_temp = pd.read_csv(uploaded_file, header=header_row - 1, nrows=0, sep=";")
-                else:
-                    df_temp = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=header_row - 1, nrows=0, engine="openpyxl")
-                
-                st.session_state.split_state["all_columns"] = list(df_temp.columns)
-                st.session_state.split_state["columns_loaded"] = True
-                
-                with col_split:
-                    split_column = st.selectbox(
-                        "📌 Kolom Split:",
-                        st.session_state.split_state["all_columns"],
-                        help=_get_help_text("kolom_split")
-                    )
-            except Exception as e:
-                st.error(f"Gagal membaca kolom: {e}")
-
-        if btn_preview and st.session_state.split_state["columns_loaded"]:
-            uploaded_file.seek(0)
-            try:
-                if is_csv:
-                    try:
-                        df_preview = pd.read_csv(uploaded_file, header=header_row - 1, nrows=10)
-                    except:
-                        uploaded_file.seek(0)
-                        df_preview = pd.read_csv(uploaded_file, header=header_row - 1, nrows=10, sep=";")
-                else:
-                    df_preview = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=header_row - 1, nrows=10, engine="openpyxl")
-                
-                st.session_state.split_state["df_preview"] = df_preview
-                
-                with st.expander("👁️ Preview Data (10 Baris Pertama)", expanded=False):
-                    st.dataframe(df_preview, use_container_width=True)
-            except Exception as e:
-                st.error(f"Gagal preview: {e}")
-
-        if st.session_state.split_state["columns_loaded"] and split_column != "(Pilih kolom setelah klik 'Baca Kolom')":
+        if target_split_col and target_split_col in df_full.columns:
             st.divider()
             st.subheader("📊 Preview Statistik")
             
-            uploaded_file.seek(0)
-            try:
-                if is_csv:
-                    try:
-                        df_full = pd.read_csv(uploaded_file, header=header_row - 1, dtype=str)
-                    except:
-                        uploaded_file.seek(0)
-                        df_full = pd.read_csv(uploaded_file, header=header_row - 1, dtype=str, sep=";")
-                else:
-                    df_full = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=header_row - 1, engine="openpyxl", dtype=str)
-                
-                df_full = df_full.fillna("")
-                
-                unique_vals = [v for v in df_full[split_column].unique() if str(v).strip() not in ("", "nan", "None")]
-                
-                col_stat1, col_stat2, col_stat3 = st.columns(3)
-                col_stat1.metric("Total Baris Data", len(df_full))
-                col_stat2.metric("Unique Nilai Split", len(unique_vals))
-                col_stat3.metric("Estimasi File Output", len(unique_vals))
-                
-                if len(unique_vals) > 100:
-                    st.warning(f"⚠️ Perhatian: Akan ada {len(unique_vals)} file output. Proses mungkin memerlukan waktu lama.")
-                
-                st.info(help=_get_help_text("preview_stats"))
-                
-            except Exception as e:
-                st.error(f"Gagal menghitung statistik: {e}")
+            df_stats = df_full
+            
+            unique_vals = [v for v in df_stats[target_split_col].unique() if str(v).strip() not in ("", "nan", "None")]
+            
+            col_stat1, col_stat2, col_stat3 = st.columns(3)
+            col_stat1.metric("Total Baris Data", len(df_stats))
+            col_stat2.metric("Unique Nilai Split", len(unique_vals))
+            col_stat3.metric("Estimasi File Output", len(unique_vals))
+            
+            if len(unique_vals) > 100:
+                st.warning(f"⚠️ Perhatian: Akan ada {len(unique_vals)} file output. Proses mungkin memerlukan waktu lama.")
+            
+            st.info(help=_get_help_text("preview_stats"))
 
             st.divider()
             st.subheader("⚙️ Pengaturan Format")
@@ -961,8 +937,9 @@ def render_split_page():
                 help=_get_help_text("text_format")
             )
             
+            all_columns = cols
+            
             if enable_text_format:
-                all_columns = st.session_state.split_state["all_columns"]
                 auto_detected = _auto_detect_text_columns(all_columns)
                 
                 col_select1, col_select2 = st.columns([1, 4])
@@ -1025,7 +1002,7 @@ def render_split_page():
                         st.session_state.split_state["cancel_requested"] = True
                         st.rerun()
 
-            if btn_proses and split_column:
+            if btn_proses and target_split_col:
                 st.session_state.split_state["processing"] = True
                 st.session_state.split_state["cancel_requested"] = False
                 st.session_state.split_state["progress"] = 0
@@ -1037,19 +1014,12 @@ def render_split_page():
                 status_text = st.empty()
                 
                 try:
-                    uploaded_file.seek(0)
-                    if is_csv:
-                        try:
-                            df_full = pd.read_csv(uploaded_file, header=header_row - 1, dtype=str)
-                        except:
-                            uploaded_file.seek(0)
-                            df_full = pd.read_csv(uploaded_file, header=header_row - 1, dtype=str, sep=";")
-                    else:
-                        df_full = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=header_row - 1, engine="openpyxl", dtype=str)
+                    df_split_data = df_full
+                    split_column = target_split_col
                     
-                    df_full = df_full.fillna("")
+                    df_split_data = df_split_data.fillna("")
                     
-                    unique_vals = [v for v in df_full[split_column].unique() if str(v).strip() not in ("", "nan", "None")]
+                    unique_vals = [v for v in df_split_data[split_column].unique() if str(v).strip() not in ("", "nan", "None")]
                     total_files = len(unique_vals)
                     
                     zip_buffer = io.BytesIO()
@@ -1060,7 +1030,7 @@ def render_split_page():
                                 status_text.warning("⚠️ Proses dibatalkan. Semua file yang sudah dibuat akan dihapus.")
                                 break
                             
-                            df_subset = df_full[df_full[split_column] == val].reset_index(drop=True)
+                            df_subset = df_split_data[df_split_data[split_column] == val].reset_index(drop=True)
                             
                             safe_name = str(val).strip()
                             for char in ['/', '\\', ':', '*', '?', '"', '<', '>', '|']:
