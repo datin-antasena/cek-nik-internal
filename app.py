@@ -892,23 +892,13 @@ def render_split_page():
             st.error("⚠️ Header tidak ditemukan.")
             return
         
-        col_split, col_preview = st.columns([3, 1])
+        col_split = st.selectbox(
+            "📌 Kolom Split:",
+            cols,
+            help=_get_help_text("kolom_split")
+        )
         
-        with col_split:
-            target_split_col = st.selectbox(
-                "📌 Kolom Split:",
-                cols,
-                help=_get_help_text("kolom_split")
-            )
-        
-        with col_preview:
-            st.write("")
-            if st.button("👁️ Preview Data", use_container_width=True):
-                st.session_state.split_state["df_preview"] = df_full.head(10)
-        
-        if st.session_state.get("split_state", {}).get("df_preview") is not None:
-            with st.expander("👁️ Preview Data (10 Baris Pertama)", expanded=False):
-                st.dataframe(st.session_state.split_state["df_preview"], use_container_width=True)
+        target_split_col = col_split
 
         if target_split_col and target_split_col in df_full.columns:
             st.divider()
