@@ -930,17 +930,12 @@ def render_split_page():
             all_columns = cols
             
             if enable_text_format:
-                auto_detected = _auto_detect_text_columns(all_columns)
-                
                 checked_columns = st.multiselect(
                     "Pilih kolom yang perlu diformat teks (agar tidak terkonversi):",
                     options=all_columns,
-                    default=list(auto_detected),
+                    default=[],
                     help=_get_help_text("select_columns")
                 )
-                
-                if auto_detected:
-                    st.caption(f"💡 Tip: {len(auto_detected)} kolom terdeteksi otomatis (mengandung keyword: NIK, KK, NO. HP, TANGGAL, SK, BAST)")
             else:
                 checked_columns = []
 
