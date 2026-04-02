@@ -939,7 +939,6 @@ def render_split_page():
                     deselect_all = st.button("☐ Deselect All", use_container_width=True)
                 
                 st.caption("Pilih kolom yang perlu diformat teks (agar tidak terkonversi):")
-                st.caption(help=_get_help_text("select_columns"))
                 
                 if "selected_text_columns" not in st.session_state:
                     st.session_state.selected_text_columns = auto_detected
@@ -964,8 +963,6 @@ def render_split_page():
                             value=is_checked,
                             key=f"chk_{col}"
                         )
-                
-                st.caption(help=_get_help_text("select_all"))
                 
                 checked_columns = [col for col, checked in checkbox_states.items() if checked]
                 
