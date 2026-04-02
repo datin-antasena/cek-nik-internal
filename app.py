@@ -926,7 +926,7 @@ def render_split_page():
             if len(unique_vals) > 100:
                 st.warning(f"⚠️ Perhatian: Akan ada {len(unique_vals)} file output. Proses mungkin memerlukan waktu lama.")
             
-            st.info(help=_get_help_text("preview_stats"))
+            st.info(_get_help_text("preview_stats"))
 
             st.divider()
             st.subheader("⚙️ Pengaturan Format")
