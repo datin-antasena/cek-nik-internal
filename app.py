@@ -1,5 +1,8 @@
 import io
+import os
 import re as _re
+import zipfile
+import time
 from datetime import datetime, date, timedelta as _timedelta
 from difflib import get_close_matches as _get_close_matches
 from zoneinfo import ZoneInfo
@@ -10,6 +13,7 @@ import gspread
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+from openpyxl import load_workbook
 from google.oauth2.service_account import Credentials
 
 
@@ -72,6 +76,12 @@ COLOR_MAP_KATEGORI = {
     "LANSIA": "#ffa726",
     "TIDAK VALID": "#ef5350",
 }
+
+TEXT_COLUMNS_KEYWORDS = [
+    "NIK", "KK", "NO KK", "NO. HP", "NOMOR HP", 
+    "TANGGAL", "TGL", "SK", "NOMOR SK", 
+    "BAST", "NOMOR BAST", "NOMOR", "NO "
+]
 
 
 # ─── DATA FETCHING ─────────────────────────────────────────────────────────────
@@ -165,8 +175,6 @@ def proses_kolom(df_result, col_name, use_auto_clean, referensi_salur):
 
 # ─── AGE CATEGORY LOGIC ───────────────────────────────────────────────────────
 
-
-# Mapping nama bulan Indonesia → Inggris untuk parsing
 _BULAN_ID = {
     "januari": "January", "februari": "February", "maret": "March",
     "april": "April", "mei": "May", "juni": "June",
@@ -175,110 +183,82 @@ _BULAN_ID = {
 }
 
 def _ganti_bulan_id(tgl_str: str) -> str:
-    """
-    Ganti nama bulan Indonesia ke Inggris.
-    Mendukung typo ringan (contoh: 'agistis' → 'agustus') via fuzzy matching.
-    """
-    # Cari kata yang mungkin nama bulan (3+ huruf, bukan angka)
     kata_list = _re.findall(r"[a-zA-Z]{3,}", tgl_str)
     hasil = tgl_str
     for kata in kata_list:
         kata_lower = kata.lower()
-        # Cek exact match dulu
         if kata_lower in _BULAN_ID:
             hasil = _re.sub(kata, _BULAN_ID[kata_lower], hasil, flags=_re.IGNORECASE)
         else:
-            # Fuzzy match: cutoff lebih tinggi untuk kata pendek (≤5 huruf) 
-            # agar tidak salah cocok (misal "pria" → "april")
             cutoff = 0.75 if len(kata_lower) <= 5 else 0.6
             cocok = _get_close_matches(kata_lower, _BULAN_ID.keys(), n=1, cutoff=cutoff)
             if cocok:
                 hasil = _re.sub(kata, _BULAN_ID[cocok[0]], hasil, flags=_re.IGNORECASE)
     return hasil
 
-# Format-format non-ambigu: urutan komponen sudah jelas
 _FORMATS_PASTI = [
-    "%Y/%m/%d", "%Y-%m-%d",                        # tahun di depan → pasti yyyy-mm-dd
-    "%d %b %Y", "%d %B %Y",                        # bulan teks → pasti dd-month-yyyy
+    "%Y/%m/%d", "%Y-%m-%d",
+    "%d %b %Y", "%d %B %Y",
     "%d-%b-%Y", "%d-%B-%Y",
     "%d/%b/%Y", "%d/%B/%Y",
     "%d %b %y", "%d %B %y",
 ]
 
-# Format-format ambigu yang butuh petunjuk dari user (dayfirst vs monthfirst)
 _FORMATS_AMBIGU_DAYFIRST   = ["%d/%m/%Y", "%d-%m-%Y", "%d/%m/%y", "%d-%m-%y", "%d %m %Y", "%d %m %y",
                                "%d|%m|%Y", "%d|%m|%y"]
 _FORMATS_AMBIGU_MONTHFIRST = ["%m/%d/%Y", "%m-%d-%Y", "%m/%d/%y", "%m-%d-%y", "%m %d %Y", "%m %d %y",
-                               "%m|%d|%Y", "%m|%d|%y"]
+                                "%m|%d|%Y", "%m|%d|%y"]
 
 
 def _angka_bagian(tgl_str: str):
-    """Ekstrak bagian-bagian angka dari string tanggal (maks 3 grup)."""
     return _re.findall(r"\d+", tgl_str)
 
 
 def _parse_tanggal(tgl_str: str, dayfirst: bool = True) -> tuple[datetime | None, bool]:
-    """
-    Parse string tanggal, kembalikan (datetime|None, is_ambigu).
-
-    is_ambigu = True artinya angka pertama ≤ 12 sehingga bisa jadi dd atau mm.
-    Parameter dayfirst menentukan interpretasi default saat ambigu:
-      - True  → anggap angka pertama adalah hari (dd/mm) — default Indonesia
-      - False → anggap angka pertama adalah bulan (mm/dd) — gaya Amerika
-    """
     tgl_str = tgl_str.strip()
     if not tgl_str or tgl_str.lower() in ("nan", "none", "-", ""):
         return None, False
 
-    # ── 0. Konversi nama bulan Indonesia → Inggris ──────────────────────────
     tgl_str = _ganti_bulan_id(tgl_str)
 
-    # ── 1. Serial Excel ─────────────────────────────────────────────────────
     if tgl_str.isdigit() and 10000 < int(tgl_str) < 60000:
         try:
             return datetime(1899, 12, 30) + _timedelta(days=int(tgl_str)), False
         except Exception:
             pass
 
-    # ── 2. Format non-ambigu (tahun di depan / bulan teks) ─────────────────
     for fmt in _FORMATS_PASTI:
         try:
             return datetime.strptime(tgl_str, fmt), False
         except ValueError:
             continue
 
-    # ── 3. Format ambigu: cek apakah angka pertama > 12 ────────────────────
     bagian = _angka_bagian(tgl_str)
     if len(bagian) >= 2:
         angka_pertama = int(bagian[0])
 
         if angka_pertama > 12:
-            # Pasti DD (tidak ada bulan ke-13 dst.)
             for fmt in _FORMATS_AMBIGU_DAYFIRST:
                 try:
                     return datetime.strptime(tgl_str, fmt), False
                 except ValueError:
                     continue
-
         else:
-            # Ambigu: angka pertama bisa dd atau mm
             formats_utama = _FORMATS_AMBIGU_DAYFIRST if dayfirst else _FORMATS_AMBIGU_MONTHFIRST
             formats_alt   = _FORMATS_AMBIGU_MONTHFIRST if dayfirst else _FORMATS_AMBIGU_DAYFIRST
 
             for fmt in formats_utama:
                 try:
-                    return datetime.strptime(tgl_str, fmt), True   # berhasil tapi ambigu
+                    return datetime.strptime(tgl_str, fmt), True
                 except ValueError:
                     continue
 
-            # Coba format alternatif sebagai last resort
             for fmt in formats_alt:
                 try:
                     return datetime.strptime(tgl_str, fmt), True
                 except ValueError:
                     continue
 
-    # ── 4. Fallback dateutil ─────────────────────────────────────────────────
     try:
         return dateutil_parser.parse(tgl_str, dayfirst=dayfirst), False
     except Exception:
@@ -288,7 +268,6 @@ def _parse_tanggal(tgl_str: str, dayfirst: bool = True) -> tuple[datetime | None
 
 
 def tentukan_kategori_umur(usia):
-    """Mengkategorikan usia menjadi ANAK, DEWASA, atau LANSIA."""
     if usia is None:
         return "TIDAK VALID"
     if usia < 18:
@@ -299,10 +278,6 @@ def tentukan_kategori_umur(usia):
 
 
 def proses_kolom_usia(df_result, col_tgl_lahir, tgl_pengecekan, dayfirst: bool = True):
-    """
-    Menambahkan kolom USIA, KATEGORI_UMUR, TGL_PARSED, dan CATATAN_PARSE ke df_result.
-    Parameter dayfirst menentukan interpretasi saat format tanggal ambigu.
-    """
     usia_col     = f"USIA_{col_tgl_lahir}"
     kategori_col = f"KATEGORI_UMUR_{col_tgl_lahir}"
     parsed_col   = f"TGL_PARSED_{col_tgl_lahir}"
@@ -332,7 +307,7 @@ def proses_kolom_usia(df_result, col_tgl_lahir, tgl_pengecekan, dayfirst: bool =
     return df_result, usia_col, kategori_col, parsed_col, catatan_col
 
 
-# ─── UI HELPERS ───────────────────────────────────────────────────────────────
+# ─── UI HELPERS (VALIDASI) ─────────────────────────────────────────────────────
 
 def render_charts(df_result, col_name):
     status_col = f"STATUS_{col_name}"
@@ -372,7 +347,6 @@ def render_charts(df_result, col_name):
 
 
 def render_charts_kategori_umur(df_result, kategori_col, col_tgl_lahir, usia_col, parsed_col, catatan_col):
-    """Menampilkan visualisasi distribusi kategori umur."""
     data_counts = df_result[kategori_col].value_counts().reset_index()
     data_counts.columns = ["Kategori", "Jumlah"]
 
@@ -409,7 +383,6 @@ def render_charts_kategori_umur(df_result, kategori_col, col_tgl_lahir, usia_col
         fig_bar.update_traces(textposition="outside")
         st.plotly_chart(fig_bar, use_container_width=True)
 
-    # Distribusi histogram usia (yang berhasil di-parse)
     df_valid_usia = df_result[df_result[usia_col].notna()].copy()
     if not df_valid_usia.empty:
         fig_hist = px.histogram(
@@ -425,7 +398,6 @@ def render_charts_kategori_umur(df_result, kategori_col, col_tgl_lahir, usia_col
                            annotation_text="60 th (Lansia)", annotation_position="top right")
         st.plotly_chart(fig_hist, use_container_width=True)
 
-    # Tampilkan baris yang gagal di-parse agar bisa diverifikasi
     df_gagal = df_result[df_result[parsed_col] == "TIDAK DIKENALI"]
     if not df_gagal.empty:
         with st.expander(f"⚠️ {len(df_gagal)} baris tanggal tidak berhasil di-parse — klik untuk lihat detail", expanded=False):
@@ -435,7 +407,6 @@ def render_charts_kategori_umur(df_result, kategori_col, col_tgl_lahir, usia_col
                 use_container_width=True,
             )
 
-    # Tampilkan baris yang ambigu (angka pertama ≤ 12, bisa dd atau mm)
     df_ambigu = df_result[df_result[catatan_col] == "Ambigu (dd/mm atau mm/dd?)"]
     if not df_ambigu.empty:
         with st.expander(
@@ -471,7 +442,6 @@ def render_filtered_table(df_result, target_cols):
 
 
 def render_filtered_table_usia(df_result, kategori_cols):
-    """Tabel dengan filter kategori umur."""
     df_display = df_result.copy()
     filter_cols = st.columns(len(kategori_cols))
 
@@ -511,7 +481,7 @@ def bersihkan_nama_file(nama):
     return nama
 
 
-# ─── SIDEBAR ──────────────────────────────────────────────────────────────────
+# ─── SIDEBAR (VALIDASI) ─────────────────────────────────────────────────────────
 
 def render_sidebar(waktu_tarik):
     with st.sidebar:
@@ -529,13 +499,14 @@ def render_sidebar(waktu_tarik):
 
         if st.button("Hapus Log"):
             try:
-                open("activity_log.txt", "w").close()
+                with open("activity_log.txt", "w") as f:
+                    pass
                 st.rerun()
             except Exception:
                 pass
 
 
-# ─── FILE READING ─────────────────────────────────────────────────────────────
+# ─── FILE READING (VALIDASI) ───────────────────────────────────────────────────
 
 def baca_preview_mentah(uploaded_file, selected_sheet, is_csv):
     if is_csv:
@@ -562,9 +533,9 @@ def baca_data_penuh(uploaded_file, selected_sheet, is_csv, header_row_input):
         return pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=header_idx, engine="openpyxl")
 
 
-# ─── MAIN ─────────────────────────────────────────────────────────────────────
+# ─── VALIDASI PAGE ─────────────────────────────────────────────────────────────
 
-def main():
+def render_validasi_page():
     st.markdown(STYLES, unsafe_allow_html=True)
     st.title("📊 Dashboard Validasi Data - Internal Antasena")
     st.info("Fitur: Atur Posisi Header, Multi-Kolom, Multi-Sheet, Auto Cleansing, Visualisasi, Auto-Format Text & Kategori Umur.")
@@ -575,14 +546,12 @@ def main():
     if "is_processed" not in st.session_state:
         st.session_state.is_processed = False
 
-    # ── Upload ──
     uploaded_file = st.file_uploader("Upload file Excel/CSV", type=["xlsx", "xlsm", "xls", "csv"])
     if uploaded_file is None:
         st.write("<br><br><br>", unsafe_allow_html=True)
         return
 
     try:
-        # ── Deteksi tipe file & daftar sheet ──
         is_csv = uploaded_file.name.endswith(".csv")
         if is_csv:
             daftar_sheet = ["Sheet1"]
@@ -590,7 +559,6 @@ def main():
             xls = pd.ExcelFile(uploaded_file, engine="openpyxl")
             daftar_sheet = xls.sheet_names
 
-        # ── Konfigurasi File ──
         st.subheader("1. Konfigurasi File")
         col_sheet, col_header_row = st.columns([2, 1])
 
@@ -601,7 +569,6 @@ def main():
                 st.info("File CSV terdeteksi (Hanya 1 Sheet).")
                 selected_sheet = daftar_sheet[0]
 
-        # Preview mentah
         df_preview_raw = baca_preview_mentah(uploaded_file, selected_sheet, is_csv)
         df_preview_raw = df_preview_raw.fillna("")
 
@@ -614,12 +581,11 @@ def main():
             header_row_input = st.number_input("Header Table ada di baris ke:", min_value=1, value=1)
             hapus_baris_penomoran = st.checkbox(
                 "Abaikan baris nomor kolom (1, 2, 3...) "
-                "Membuang 1 baris dibawah header bila terdapat urutan angka kolom",
+                "Membuang 1 baris debajo header bila terdapat urutan angka kolom",
                 value=False,
                 help="Otomatis membuang 1 baris tepat di bawah header jika isinya hanya urutan angka kolom.",
             )
 
-        # ── Baca data penuh ──
         df = baca_data_penuh(uploaded_file, selected_sheet, is_csv, header_row_input)
         df.dropna(how="all", inplace=True)
 
@@ -630,7 +596,6 @@ def main():
         for col in df.columns:
             df[col] = df[col].replace("nan", "").str.replace(r"\.0$", "", regex=True)
 
-        # ── Pilih Kolom ──
         st.divider()
         st.subheader("2. Pilih Kolom Data")
         cols = df.columns.tolist()
@@ -653,7 +618,6 @@ def main():
                 help="Otomatis menghapus spasi, titik, strip, dan huruf.",
             )
 
-        # ── Fitur Kategori Umur ──
         st.divider()
         st.subheader("3. Cek Kategori Umur (Opsional)")
         st.caption(
@@ -710,15 +674,11 @@ def main():
                     f"📌 **Aturan Kategorisasi:**\n"
                     f"- **ANAK**: Usia < 18 tahun\n"
                     f"- **DEWASA**: 18 \u2264 Usia < 60 tahun\n"
-                    f"- **LANSIA**: Usia \u2265 60 tahun\n\n"
+                    f"- **LANSIA**: Usia \u2264 60 tahun\n\n"
                     f"Tanggal pengecekan: **{tgl_pengecekan_input.strftime('%d/%m/%Y')}** | "
                     f"Interpretasi ambigu: **{'dd/mm' if dayfirst else 'mm/dd'}**"
                 )
 
-        # ── Tombol Proses ──
-        # Tombol selalu aktif selama ada kolom NIK/NKK dipilih.
-        # Fitur umur sepenuhnya opsional — tidak dipilihnya kolom tgl lahir
-        # tidak menghalangi proses validasi NIK/NKK berjalan normal.
         if st.button("🚀 Proses & Analisa Data"):
             if not target_cols:
                 st.warning("⚠️ Silakan pilih minimal 1 kolom NIK/NKK untuk diproses.")
@@ -727,12 +687,10 @@ def main():
                     df_result = df.copy()
                     log_data_all = {}
 
-                    # Proses NIK/NKK (selalu dijalankan)
                     for col_name in target_cols:
                         df_result = proses_kolom(df_result, col_name, use_auto_clean, set_salur_2026)
                         log_data_all[col_name] = df_result[f"STATUS_{col_name}"].value_counts().to_dict()
 
-                    # Proses Kategori Umur (hanya jika diaktifkan DAN kolom dipilih)
                     hasil_usia = {}
                     if aktifkan_cek_umur and cols_tgl_lahir_dipilih:
                         for col_tgl in cols_tgl_lahir_dipilih:
@@ -748,7 +706,6 @@ def main():
                     st.session_state.hasil_usia = hasil_usia
                     st.session_state.is_processed = True
 
-        # ── Tampilan Hasil ──
         if (
             st.session_state.get("is_processed")
             and st.session_state.get("target_cols_saved") == target_cols
@@ -756,7 +713,6 @@ def main():
             df_result = st.session_state.df_result
             hasil_usia = st.session_state.get("hasil_usia", {})
 
-            # ─── Hasil NIK/NKK ───
             if target_cols:
                 st.divider()
                 st.subheader("📊 Hasil Analisa Visual NIK/NKK")
@@ -770,7 +726,6 @@ def main():
                 st.subheader("📋 Tabel Data NIK/NKK")
                 render_filtered_table(df_result, target_cols)
 
-            # ─── Hasil Kategori Umur ───
             if hasil_usia:
                 st.divider()
                 st.subheader("👥 Hasil Analisa Kategori Umur")
@@ -787,7 +742,6 @@ def main():
                 kategori_cols = [v[1] for v in hasil_usia.values()]
                 render_filtered_table_usia(df_result, kategori_cols)
 
-            # ── Download ──
             st.divider()
             buffer = buat_excel_buffer(df_result, selected_sheet)
             clean_name = bersihkan_nama_file(uploaded_file.name)
@@ -802,6 +756,395 @@ def main():
         st.error(f"Terjadi kesalahan: {e}")
 
     st.write("<br><br><br>", unsafe_allow_html=True)
+
+
+# ─── SPLIT WORKBOOK PAGE ───────────────────────────────────────────────────────
+
+def _get_help_text(section: str) -> str:
+    help_content = {
+        "upload": "Upload file Excel (.xlsx, .xlsm, .xls). File akan diproses di memory server dan tidak disimpan secara permanen.",
+        "header_row": "Baris yang berisi nama kolom header. Default: 1 (baris pertama). Ubah jika header tidak di baris pertama.",
+        "kolom_split": "Pilih kolom yang nilainya akan digunakan untuk memecah file. Setiap unique value di kolom ini akan menjadi 1 file output terpisah.",
+        "preview_stats": "Menampilkan statistik dasar: jumlah baris data, jumlah unique value di kolom split, dan estimasi jumlah file yang akan dihasilkan.",
+        "text_format": "Aktifkan untuk menjaga format teks di kolom tertentu agar tidak terkonversi menjadi angka oleh Excel. Contoh: NIK '0012345678901234' tidak berubah jadi '1.2345E+15'.",
+        "select_columns": "Pilih kolom yang perlu diformat sebagai teks. Sistem akan otomatis mendeteksi kolom yang mengandung keyword seperti: NIK, KK, NO. HP, TANGGAL, SK, BAST.",
+        "select_all": "Centang untuk memilih semua kolom. Batalkan centang untuk membatalkan semua pilihan.",
+        "process": "Memulai proses pemisahan file. File output akan dibundle dalam 1 file ZIP untuk download.",
+        "cancel": "Membatalkan proses. Semua file yang sudah dibuat akan dihapus.",
+    }
+    return help_content.get(section, "")
+
+
+def _auto_detect_text_columns(columns: list) -> set:
+    detected = set()
+    for col in columns:
+        col_upper = str(col).upper()
+        for keyword in TEXT_COLUMNS_KEYWORDS:
+            if keyword.upper() in col_upper:
+                detected.add(col)
+                break
+    return detected
+
+
+def _enforce_text_format_in_memory(excel_bytes: bytes, sheet_name: str, selected_columns: set) -> bytes:
+    from io import BytesIO
+    wb = load_workbook(BytesIO(excel_bytes))
+    ws = wb[sheet_name]
+    
+    col_indices = {}
+    for col_cell in ws[1]:
+        if col_cell.value in selected_columns:
+            col_indices[col_cell.column] = col_cell.value
+    
+    if col_indices:
+        for col_idx in col_indices:
+            for row in ws.iter_rows(min_row=2, min_col=col_idx, max_col=col_idx):
+                for cell in row:
+                    if cell.value is not None:
+                        cell.value = str(cell.value).strip()
+                        cell.number_format = "@"
+    
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output.getvalue()
+
+
+def render_split_page():
+    st.title("📤 Split Workbook - Internal Antasena")
+    st.caption("Pecah file Excel berdasarkan kolom tertentu menjadi beberapa file.")
+
+    if "split_state" not in st.session_state:
+        st.session_state.split_state = {
+            "columns_loaded": False,
+            "df_preview": None,
+            "all_columns": [],
+            "processing": False,
+            "cancel_requested": False,
+            "progress": 0,
+            "files_created": [],
+            "start_time": None,
+        }
+
+    uploaded_file = st.file_uploader(
+        "📁 Upload File Excel",
+        type=["xlsx", "xlsm", "xls"],
+        help=_get_help_text("upload")
+    )
+
+    if not uploaded_file:
+        st.write("<br><br>", unsafe_allow_html=True)
+        return
+
+    try:
+        is_csv = uploaded_file.name.endswith(".csv")
+        
+        col_file, col_header = st.columns([3, 1])
+        
+        with col_file:
+            if not is_csv:
+                xls = pd.ExcelFile(uploaded_file, engine="openpyxl")
+                daftar_sheet = xls.sheet_names
+                selected_sheet = st.selectbox("📋 Sheet:", daftar_sheet)
+            else:
+                selected_sheet = "Sheet1"
+                st.info("File CSV terdeteksi (Hanya 1 Sheet).")
+        
+        with col_header:
+            header_row = st.number_input(
+                "🔢 Header Baris:",
+                min_value=1,
+                value=1,
+                help=_get_help_text("header_row")
+            )
+
+        st.divider()
+
+        col_split, col_buttons = st.columns([3, 1])
+        
+        with col_split:
+            split_column = st.selectbox(
+                "📌 Kolom Split:",
+                ["(Pilih kolom setelah klik 'Baca Kolom')"],
+                help=_get_help_text("kolom_split")
+            )
+        
+        with col_buttons:
+            st.write("")
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                btn_read = st.button("📥 Baca Kolom", use_container_width=True)
+            with col_btn2:
+                btn_preview = st.button("👁️ Preview Data", use_container_width=True)
+
+        if btn_read or st.session_state.split_state["columns_loaded"]:
+            uploaded_file.seek(0)
+            try:
+                if is_csv:
+                    try:
+                        df_temp = pd.read_csv(uploaded_file, header=header_row - 1, nrows=0)
+                    except:
+                        uploaded_file.seek(0)
+                        df_temp = pd.read_csv(uploaded_file, header=header_row - 1, nrows=0, sep=";")
+                else:
+                    df_temp = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=header_row - 1, nrows=0, engine="openpyxl")
+                
+                st.session_state.split_state["all_columns"] = list(df_temp.columns)
+                st.session_state.split_state["columns_loaded"] = True
+                
+                with col_split:
+                    split_column = st.selectbox(
+                        "📌 Kolom Split:",
+                        st.session_state.split_state["all_columns"],
+                        help=_get_help_text("kolom_split")
+                    )
+            except Exception as e:
+                st.error(f"Gagal membaca kolom: {e}")
+
+        if btn_preview and st.session_state.split_state["columns_loaded"]:
+            uploaded_file.seek(0)
+            try:
+                if is_csv:
+                    try:
+                        df_preview = pd.read_csv(uploaded_file, header=header_row - 1, nrows=10)
+                    except:
+                        uploaded_file.seek(0)
+                        df_preview = pd.read_csv(uploaded_file, header=header_row - 1, nrows=10, sep=";")
+                else:
+                    df_preview = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=header_row - 1, nrows=10, engine="openpyxl")
+                
+                st.session_state.split_state["df_preview"] = df_preview
+                
+                with st.expander("👁️ Preview Data (10 Baris Pertama)", expanded=False):
+                    st.dataframe(df_preview, use_container_width=True)
+            except Exception as e:
+                st.error(f"Gagal preview: {e}")
+
+        if st.session_state.split_state["columns_loaded"] and split_column != "(Pilih kolom setelah klik 'Baca Kolom')":
+            st.divider()
+            st.subheader("📊 Preview Statistik")
+            
+            uploaded_file.seek(0)
+            try:
+                if is_csv:
+                    try:
+                        df_full = pd.read_csv(uploaded_file, header=header_row - 1, dtype=str)
+                    except:
+                        uploaded_file.seek(0)
+                        df_full = pd.read_csv(uploaded_file, header=header_row - 1, dtype=str, sep=";")
+                else:
+                    df_full = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=header_row - 1, engine="openpyxl", dtype=str)
+                
+                df_full = df_full.fillna("")
+                
+                unique_vals = [v for v in df_full[split_column].unique() if str(v).strip() not in ("", "nan", "None")]
+                
+                col_stat1, col_stat2, col_stat3 = st.columns(3)
+                col_stat1.metric("Total Baris Data", len(df_full))
+                col_stat2.metric("Unique Nilai Split", len(unique_vals))
+                col_stat3.metric("Estimasi File Output", len(unique_vals))
+                
+                if len(unique_vals) > 100:
+                    st.warning(f"⚠️ Perhatian: Akan ada {len(unique_vals)} file output. Proses mungkin memerlukan waktu lama.")
+                
+                st.info(help=_get_help_text("preview_stats"))
+                
+            except Exception as e:
+                st.error(f"Gagal menghitung statistik: {e}")
+
+            st.divider()
+            st.subheader("⚙️ Pengaturan Format")
+            
+            enable_text_format = st.checkbox(
+                "Aktifkan format teks untuk kolom sensitif",
+                value=False,
+                help=_get_help_text("text_format")
+            )
+            
+            if enable_text_format:
+                all_columns = st.session_state.split_state["all_columns"]
+                auto_detected = _auto_detect_text_columns(all_columns)
+                
+                col_select1, col_select2 = st.columns([1, 4])
+                with col_select1:
+                    select_all = st.button("☑ Select All", use_container_width=True)
+                with col_select2:
+                    deselect_all = st.button("☐ Deselect All", use_container_width=True)
+                
+                st.caption("Pilih kolom yang perlu diformat teks (agar tidak terkonversi):")
+                st.caption(help=_get_help_text("select_columns"))
+                
+                if "selected_text_columns" not in st.session_state:
+                    st.session_state.selected_text_columns = auto_detected
+                
+                if select_all:
+                    st.session_state.selected_text_columns = set(all_columns)
+                    st.rerun()
+                
+                if deselect_all:
+                    st.session_state.selected_text_columns = set()
+                    st.rerun()
+                
+                cols_per_row = 4
+                cols_grid = st.columns(cols_per_row)
+                checkbox_states = {}
+                
+                for idx, col in enumerate(all_columns):
+                    with cols_grid[idx % cols_per_row]:
+                        is_checked = col in st.session_state.selected_text_columns
+                        checkbox_states[col] = st.checkbox(
+                            f"☐ {col[:20]}{'...' if len(col) > 20 else ''}",
+                            value=is_checked,
+                            key=f"chk_{col}"
+                        )
+                
+                st.caption(help=_get_help_text("select_all"))
+                
+                checked_columns = [col for col, checked in checkbox_states.items() if checked]
+                
+                if auto_detected:
+                    st.caption(f"💡 Tip: {len(auto_detected)} kolom terdeteksi otomatis (mengandung keyword: NIK, KK, NO. HP, TANGGAL, SK, BAST)")
+            else:
+                checked_columns = []
+
+            st.divider()
+
+            col_process, col_cancel = st.columns([1, 1])
+            
+            with col_process:
+                process_disabled = st.session_state.split_state["processing"]
+                btn_proses = st.button(
+                    "🚀 JALANKAN PROSES",
+                    use_container_width=True,
+                    disabled=process_disabled
+                )
+            
+            with col_cancel:
+                if st.session_state.split_state["processing"]:
+                    if st.button("⏹️ BATALKAN", use_container_width=True):
+                        st.session_state.split_state["cancel_requested"] = True
+                        st.rerun()
+
+            if btn_proses and split_column:
+                st.session_state.split_state["processing"] = True
+                st.session_state.split_state["cancel_requested"] = False
+                st.session_state.split_state["progress"] = 0
+                st.session_state.split_state["files_created"] = []
+                st.session_state.split_state["start_time"] = time.time()
+                
+                progress_bar = st.progress(0)
+                progress_text = st.empty()
+                status_text = st.empty()
+                
+                try:
+                    uploaded_file.seek(0)
+                    if is_csv:
+                        try:
+                            df_full = pd.read_csv(uploaded_file, header=header_row - 1, dtype=str)
+                        except:
+                            uploaded_file.seek(0)
+                            df_full = pd.read_csv(uploaded_file, header=header_row - 1, dtype=str, sep=";")
+                    else:
+                        df_full = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=header_row - 1, engine="openpyxl", dtype=str)
+                    
+                    df_full = df_full.fillna("")
+                    
+                    unique_vals = [v for v in df_full[split_column].unique() if str(v).strip() not in ("", "nan", "None")]
+                    total_files = len(unique_vals)
+                    
+                    zip_buffer = io.BytesIO()
+                    
+                    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+                        for i, val in enumerate(unique_vals):
+                            if st.session_state.split_state["cancel_requested"]:
+                                status_text.warning("⚠️ Proses dibatalkan. Semua file yang sudah dibuat akan dihapus.")
+                                break
+                            
+                            df_subset = df_full[df_full[split_column] == val].reset_index(drop=True)
+                            
+                            safe_name = str(val).strip()
+                            for char in ['/', '\\', ':', '*', '?', '"', '<', '>', '|']:
+                                safe_name = safe_name.replace(char, '-')
+                            
+                            filename = f"{safe_name}.xlsx"
+                            
+                            temp_buffer = io.BytesIO()
+                            with pd.ExcelWriter(temp_buffer, engine='openpyxl') as writer:
+                                df_subset.to_excel(writer, index=False, sheet_name=selected_sheet)
+                            temp_buffer.seek(0)
+                            
+                            if checked_columns:
+                                excel_bytes = _enforce_text_format_in_memory(
+                                    temp_buffer.getvalue(),
+                                    selected_sheet,
+                                    set(checked_columns)
+                                )
+                                zf.writestr(filename, excel_bytes)
+                            else:
+                                zf.writestr(filename, temp_buffer.getvalue())
+                            
+                            st.session_state.split_state["files_created"].append(filename)
+                            
+                            progress = int((i + 1) / total_files * 100)
+                            st.session_state.split_state["progress"] = progress
+                            
+                            progress_bar.progress(progress)
+                            progress_text.text(f"{i + 1}/{total_files} files ({progress}%)")
+                    
+                    if not st.session_state.split_state["cancel_requested"]:
+                        elapsed = time.time() - st.session_state.split_state["start_time"]
+                        
+                        zip_buffer.seek(0)
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        
+                        st.divider()
+                        st.success(f"✅ Selesai! {len(st.session_state.split_state['files_created'])} file berhasil dibuat ({elapsed:.1f} detik)")
+                        
+                        st.download_button(
+                            label="📥 Download Hasil Split (ZIP)",
+                            data=zip_buffer.getvalue(),
+                            file_name=f"split_result_{timestamp}.zip",
+                            mime="application/zip",
+                            use_container_width=True
+                        )
+                    else:
+                        zip_buffer.close()
+                        
+                except Exception as e:
+                    st.error(f"Terjadi kesalahan: {e}")
+                
+                finally:
+                    st.session_state.split_state["processing"] = False
+            
+            if st.session_state.split_state["processing"]:
+                progress_bar = st.progress(st.session_state.split_state["progress"])
+                progress_text = st.text(f"{st.session_state.split_state['progress']}%")
+                
+                if st.session_state.split_state["files_created"]:
+                    status_text.text(f"Sedang memproses: {len(st.session_state.split_state['files_created'])} files sudah dibuat...")
+
+    except Exception as e:
+        st.error(f"Terjadi kesalahan: {e}")
+
+    st.write("<br><br>", unsafe_allow_html=True)
+
+
+# ─── MAIN ─────────────────────────────────────────────────────────────────────
+
+def main():
+    st.markdown(STYLES, unsafe_allow_html=True)
+    
+    st.sidebar.title("📋 Menu Utama")
+    
+    menu_options = ["Validasi Data", "Split Workbook"]
+    selected_menu = st.sidebar.radio("Pilih Menu:", menu_options, index=0)
+    
+    if selected_menu == "Validasi Data":
+        render_validasi_page()
+    elif selected_menu == "Split Workbook":
+        render_split_page()
+
+    st.markdown(STYLES, unsafe_allow_html=True)
 
 
 if __name__ == "__main__":
