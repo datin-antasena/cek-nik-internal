@@ -787,23 +787,51 @@ def _auto_detect_text_columns(columns: list) -> set:
     return detected
 
 
-def _normalize_for_comparison(val: str) -> str:
-    """Normalize value for fuzzy comparison."""
+def _tokenize(val: str) -> set:
+    """Tokenize value into words, removing common separators."""
     val = str(val).lower().strip()
-    val = val.replace(".", "").replace(",", "")
-    val = val.replace("  ", " ")
-    return val
+    val = val.replace(".", " ").replace(",", " ").replace("-", " ")
+    val = val.replace("_", " ").replace("/", " ").replace("\\", " ")
+    tokens = set(val.split())
+    tokens = {t for t in tokens if len(t) > 1}
+    return tokens
 
 
-def _get_similarity(s1: str, s2: str) -> float:
-    """Calculate similarity ratio between two strings."""
-    from difflib import SequenceMatcher
-    return SequenceMatcher(None, s1, s2).ratio()
+def _tokens_similarity(tokens1: set, tokens2: set) -> float:
+    """Calculate similarity based on token overlap."""
+    if not tokens1 or not tokens2:
+        return 0.0
+    
+    intersection = tokens1 & tokens2
+    union = tokens1 | tokens2
+    
+    if not union:
+        return 0.0
+    
+    jaccard = len(intersection) / len(union)
+    
+    return jaccard
 
 
-def _fuzzy_group_values(unique_values: list, frequency_map: dict, threshold: float = 0.80) -> dict:
+def _majority_tokens_match(tokens1: set, tokens2: set, threshold: float = 0.60) -> bool:
+    """Check if majority of tokens match between two values."""
+    if not tokens1 or not tokens2:
+        return False
+    
+    intersection = tokens1 & tokens2
+    min_tokens = min(len(tokens1), len(tokens2))
+    
+    if min_tokens == 0:
+        return False
+    
+    match_ratio = len(intersection) / min_tokens
+    
+    return match_ratio >= threshold
+
+
+def _fuzzy_group_values(unique_values: list, frequency_map: dict, token_threshold: float = 0.60) -> dict:
     """
-    Group similar values using fuzzy matching.
+    Group similar values using token-based fuzzy matching.
     Returns dict: {winner_value: [list of member values]}
     """
     if not unique_values:
@@ -819,17 +847,15 @@ def _fuzzy_group_values(unique_values: list, frequency_map: dict, threshold: flo
         
         cluster = [val]
         used.add(val)
-        val_normalized = _normalize_for_comparison(val)
+        val_tokens = _tokenize(val)
         
         for j, other in enumerate(values_to_check):
             if other in used or i == j:
                 continue
             
-            other_normalized = _normalize_for_comparison(other)
+            other_tokens = _tokenize(other)
             
-            similarity = _get_similarity(val_normalized, other_normalized)
-            
-            if similarity >= threshold:
+            if _majority_tokens_match(val_tokens, other_tokens, threshold=token_threshold):
                 cluster.append(other)
                 used.add(other)
         
@@ -1003,6 +1029,8 @@ def render_split_page():
                 cluster_list = list(clusters.items())
                 cluster_list.sort(key=lambda x: len(x[1]), reverse=True)
                 
+                multi_member_clusters = [(w, m) for w, m in cluster_list if len(m) > 1]
+                
                 col_stat_clean1, col_stat_clean2, col_stat_clean3 = st.columns(3)
                 col_stat_clean1.metric("Klaster Ditemukan", len(clusters))
                 col_stat_clean2.metric("Estimasi Penggabungan", len(unique_vals) - cleaned_unique_count)
@@ -1015,70 +1043,68 @@ def render_split_page():
                 
                 user_winner_picks = {}
                 
-                preview_clusters = cluster_list[:PREVIEW_LIMIT] if not show_all else cluster_list
-                remaining_clusters = cluster_list[PREVIEW_LIMIT:] if not show_all else []
+                preview_clusters = multi_member_clusters[:PREVIEW_LIMIT] if not show_all else multi_member_clusters
+                remaining_clusters = multi_member_clusters[PREVIEW_LIMIT:] if not show_all else []
                 
                 for winner, members in preview_clusters:
-                    if len(members) > 1:
-                        with st.container():
-                            st.markdown(f"**Cluster ({len(members)} nilai):**")
-                            member_display = ", ".join([f"`{m}`" for m in members])
-                            st.caption(member_display)
-                            
-                            freq_sorted = sorted(members, key=lambda x: freq_map.get(x, 0), reverse=True)
-                            options = freq_sorted
-                            
-                            default_idx = 0
-                            selected = st.selectbox(
-                                f"Pilih winner:",
-                                options=options,
-                                index=default_idx,
-                                key=f"winner_{winner}"
+                    with st.container():
+                        st.markdown(f"**Cluster ({len(members)} nilai):**")
+                        member_display = ", ".join([f"`{m}`" for m in members])
+                        st.caption(member_display)
+                        
+                        freq_sorted = sorted(members, key=lambda x: freq_map.get(x, 0), reverse=True)
+                        options = freq_sorted
+                        
+                        default_idx = 0
+                        selected = st.selectbox(
+                            f"Pilih winner:",
+                            options=options,
+                            index=default_idx,
+                            key=f"winner_{winner}"
+                        )
+                        user_winner_picks[winner] = selected
+                        
+                        with st.expander(" atau ketik manual...", expanded=False):
+                            manual_input = st.text_input(
+                                "Ketik winner manual:",
+                                value="",
+                                key=f"manual_{winner}"
                             )
-                            user_winner_picks[winner] = selected
-                            
-                            with st.expander(" atau ketik manual...", expanded=False):
-                                manual_input = st.text_input(
-                                    "Ketik winner manual:",
-                                    value="",
-                                    key=f"manual_{winner}"
-                                )
-                                if manual_input.strip():
-                                    user_winner_picks[winner] = manual_input.strip()
-                            
-                            st.markdown("---")
+                            if manual_input.strip():
+                                user_winner_picks[winner] = manual_input.strip()
+                        
+                        st.markdown("---")
                 
                 if remaining_clusters:
                     with st.expander(f"▶ Lihat {len(remaining_clusters)} klaster lainnya"):
                         for winner, members in remaining_clusters:
-                            if len(members) > 1:
-                                with st.container():
-                                    st.markdown(f"**Cluster ({len(members)} nilai):**")
-                                    member_display = ", ".join([f"`{m}`" for m in members])
-                                    st.caption(member_display)
-                                    
-                                    freq_sorted = sorted(members, key=lambda x: freq_map.get(x, 0), reverse=True)
-                                    options = freq_sorted
-                                    
-                                    default_idx = 0
-                                    selected = st.selectbox(
-                                        f"Pilih winner:",
-                                        options=options,
-                                        index=default_idx,
-                                        key=f"winner_{winner}_remaining"
+                            with st.container():
+                                st.markdown(f"**Cluster ({len(members)} nilai):**")
+                                member_display = ", ".join([f"`{m}`" for m in members])
+                                st.caption(member_display)
+                                
+                                freq_sorted = sorted(members, key=lambda x: freq_map.get(x, 0), reverse=True)
+                                options = freq_sorted
+                                
+                                default_idx = 0
+                                selected = st.selectbox(
+                                    f"Pilih winner:",
+                                    options=options,
+                                    index=default_idx,
+                                    key=f"winner_{winner}_remaining"
+                                )
+                                user_winner_picks[winner] = selected
+                                
+                                with st.expander(" atau ketik manual...", expanded=False):
+                                    manual_input = st.text_input(
+                                        "Ketik winner manual:",
+                                        value="",
+                                        key=f"manual_{winner}_remaining"
                                     )
-                                    user_winner_picks[winner] = selected
-                                    
-                                    with st.expander(" atau ketik manual...", expanded=False):
-                                        manual_input = st.text_input(
-                                            "Ketik winner manual:",
-                                            value="",
-                                            key=f"manual_{winner}_remaining"
-                                        )
-                                        if manual_input.strip():
-                                            user_winner_picks[winner] = manual_input.strip()
-                                    
-                                    st.markdown("---")
+                                    if manual_input.strip():
+                                        user_winner_picks[winner] = manual_input.strip()
+                                
+                                st.markdown("---")
                 
                 final_clusters = {}
                 for winner, members in clusters.items():
