@@ -787,6 +787,14 @@ def _auto_detect_text_columns(columns: list) -> set:
     return detected
 
 
+def _normalize_for_fuzzy(val: str) -> str:
+    """Normalize value for fuzzy comparison."""
+    val = str(val).lower().strip()
+    val = val.replace(".", " ").replace(",", " ")
+    val = val.replace("  ", " ")
+    return val
+
+
 def _tokenize(val: str) -> set:
     """Tokenize value into words, removing common separators."""
     val = str(val).lower().strip()
@@ -797,23 +805,7 @@ def _tokenize(val: str) -> set:
     return tokens
 
 
-def _tokens_similarity(tokens1: set, tokens2: set) -> float:
-    """Calculate similarity based on token overlap."""
-    if not tokens1 or not tokens2:
-        return 0.0
-    
-    intersection = tokens1 & tokens2
-    union = tokens1 | tokens2
-    
-    if not union:
-        return 0.0
-    
-    jaccard = len(intersection) / len(union)
-    
-    return jaccard
-
-
-def _majority_tokens_match(tokens1: set, tokens2: set, threshold: float = 0.60) -> bool:
+def _majority_tokens_match(tokens1: set, tokens2: set, threshold: float = 0.50) -> bool:
     """Check if majority of tokens match between two values."""
     if not tokens1 or not tokens2:
         return False
@@ -829,9 +821,36 @@ def _majority_tokens_match(tokens1: set, tokens2: set, threshold: float = 0.60) 
     return match_ratio >= threshold
 
 
-def _fuzzy_group_values(unique_values: list, frequency_map: dict, token_threshold: float = 0.60) -> dict:
+def _string_similarity(s1: str, s2: str) -> float:
+    """Calculate string similarity using SequenceMatcher."""
+    from difflib import SequenceMatcher
+    return SequenceMatcher(None, s1, s2).ratio()
+
+
+def _is_similar(val1: str, val2: str) -> bool:
     """
-    Group similar values using token-based fuzzy matching.
+    Hybrid matching: 
+    - If majority tokens match (>=50%) -> similar
+    - OR if string similarity is high (>=70%) -> similar
+    """
+    val1_norm = _normalize_for_fuzzy(val1)
+    val2_norm = _normalize_for_fuzzy(val2)
+    
+    tokens1 = _tokenize(val1)
+    tokens2 = _tokenize(val2)
+    
+    if _majority_tokens_match(tokens1, tokens2, threshold=0.50):
+        return True
+    
+    if _string_similarity(val1_norm, val2_norm) >= 0.70:
+        return True
+    
+    return False
+
+
+def _fuzzy_group_values(unique_values: list, frequency_map: dict, token_threshold: float = 0.50) -> dict:
+    """
+    Group similar values using hybrid fuzzy matching (token + string similarity).
     Returns dict: {winner_value: [list of member values]}
     """
     if not unique_values:
@@ -847,15 +866,12 @@ def _fuzzy_group_values(unique_values: list, frequency_map: dict, token_threshol
         
         cluster = [val]
         used.add(val)
-        val_tokens = _tokenize(val)
         
         for j, other in enumerate(values_to_check):
             if other in used or i == j:
                 continue
             
-            other_tokens = _tokenize(other)
-            
-            if _majority_tokens_match(val_tokens, other_tokens, threshold=token_threshold):
+            if _is_similar(val, other):
                 cluster.append(other)
                 used.add(other)
         
