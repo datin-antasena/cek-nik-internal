@@ -787,14 +787,6 @@ def _auto_detect_text_columns(columns: list) -> set:
     return detected
 
 
-def _normalize_for_fuzzy(val: str) -> str:
-    """Normalize value for fuzzy comparison."""
-    val = str(val).lower().strip()
-    val = val.replace(".", " ").replace(",", " ")
-    val = val.replace("  ", " ")
-    return val
-
-
 def _tokenize(val: str) -> set:
     """Tokenize value into words, removing common separators."""
     val = str(val).lower().strip()
@@ -805,85 +797,34 @@ def _tokenize(val: str) -> set:
     return tokens
 
 
-def _get_common_prefix_len(s1: str, s2: str) -> int:
-    """Get length of common prefix between two strings."""
-    common_len = 0
-    for c1, c2 in zip(s1, s2):
-        if c1 == c2:
-            common_len += 1
-        else:
-            break
-    return common_len
-
-
-def _remaining_similarity(s1: str, s2: str) -> float:
-    """
-    Calculate similarity of the non-common parts (after common prefix).
-    This prevents 'KABUPATEN BANTUL' matching 'KABUPATEN SLEMAN'.
-    """
-    prefix_len = _get_common_prefix_len(s1, s2)
-    
-    rem1 = s1[prefix_len:]
-    rem2 = s2[prefix_len:]
-    
-    if len(rem1) < 3 or len(rem2) < 3:
-        return 0.0
-    
-    from difflib import SequenceMatcher
-    return SequenceMatcher(None, rem1, rem2).ratio()
-
-
-def _non_common_token_match(tokens1: set, tokens2: set) -> bool:
-    """
-    Check if non-common tokens have meaningful match.
-    Returns True only if tokens share at least one significant common token
-    that is NOT just a common prefix word like 'kabupaten', 'kecamatan', etc.
-    """
-    COMMON_PREFIX_TOKENS = {
-        "kabupaten", "kota", "kecamatan", "kelurahan", "desa", "dusun",
-        "provinsi", "kec", "kel", "kab", "ds", "kabupaten kota"
-    }
-    
-    intersection = tokens1 & tokens2
-    
-    non_common_match = False
-    for token in intersection:
-        if token not in COMMON_PREFIX_TOKENS:
-            non_common_match = True
-            break
-    
-    return non_common_match
-
-
-def _string_similarity(s1: str, s2: str) -> float:
-    """Calculate string similarity using SequenceMatcher."""
-    from difflib import SequenceMatcher
-    return SequenceMatcher(None, s1, s2).ratio()
+COMMON_PREFIX_TOKENS = {
+    "kabupaten", "kota", "kecamatan", "kelurahan", "desa", "dusun",
+    "provinsi", "kec", "kel", "kab", "ds", "kabupaten kota"
+}
 
 
 def _is_similar(val1: str, val2: str) -> bool:
     """
-    Conservative matching:
-    - Require non-common tokens to match, OR
-    - Remaining parts after common prefix to be similar
-    This prevents 'KABUPATEN BANTUL' matching 'KABUPATEN SLEMAN'.
-    """
-    val1_norm = _normalize_for_fuzzy(val1)
-    val2_norm = _normalize_for_fuzzy(val2)
+    Token-based matching: values are similar ONLY if they share 
+    at least one non-prefix token (e.g., 'boyolali', 'magelang').
     
+    This prevents:
+    - 'KABUPATEN BANTUL' matching 'KABUPATEN SLEMAN' (bantul ≠ sleman)
+    - 'KAB. MAGELANG' matching 'KAB. SEMARANG' (magelang ≠ semarang)
+    
+    But still matches:
+    - 'kab. boyolali' with 'kabupaten boyolali' (share 'boyolali')
+    """
     tokens1 = _tokenize(val1)
     tokens2 = _tokenize(val2)
     
-    if _non_common_token_match(tokens1, tokens2):
-        return True
+    intersection = tokens1 & tokens2
+    non_prefix_intersection = intersection - COMMON_PREFIX_TOKENS
     
-    if _remaining_similarity(val1_norm, val2_norm) >= 0.60:
-        return True
-    
-    return False
+    return bool(non_prefix_intersection)
 
 
-def _fuzzy_group_values(unique_values: list, frequency_map: dict, token_threshold: float = 0.50) -> dict:
+def _fuzzy_group_values(unique_values: list, frequency_map: dict) -> dict:
     """
     Group similar values using hybrid fuzzy matching (token + string similarity).
     Returns dict: {winner_value: [list of member values]}
@@ -1070,7 +1011,7 @@ def render_split_page():
             cleaned_unique_count = len(unique_vals)
             
             if enable_auto_clean:
-                clusters = _fuzzy_group_values(unique_vals, freq_map, token_threshold=0.60)
+                clusters = _fuzzy_group_values(unique_vals, freq_map)
                 cleaned_unique_count = len(clusters)
             
             if enable_auto_clean and clusters:
