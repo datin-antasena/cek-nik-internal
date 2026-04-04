@@ -1074,7 +1074,7 @@ def render_split_page():
                         
                         default_idx = 0
                         selected = st.selectbox(
-                            f"Pilih winner:",
+                            f"Pilih nilai yang dipilih:",
                             options=options,
                             index=default_idx,
                             key=f"winner_{winner}"
@@ -1105,7 +1105,7 @@ def render_split_page():
                                 
                                 default_idx = 0
                                 selected = st.selectbox(
-                                    f"Pilih winner:",
+                                    f"Pilih nilai yang dipilih:",
                                     options=options,
                                     index=default_idx,
                                     key=f"winner_{winner}_remaining"
