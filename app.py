@@ -766,6 +766,7 @@ def _get_help_text(section: str) -> str:
         "header_row": "Baris yang berisi nama kolom header. Default: 1 (baris pertama). Ubah jika header tidak di baris pertama.",
         "kolom_split": "Pilih kolom yang nilainya akan digunakan untuk memecah file. Setiap unique value di kolom ini akan menjadi 1 file output terpisah.",
         "preview_stats": "Menampilkan statistik dasar: jumlah baris data, jumlah unique value di kolom split, dan estimasi jumlah file yang akan dihasilkan.",
+        "auto_clean": "Gabungkan nilai yang serupa menjadi satu. Contoh: 'kab. boyolali', 'kabupaten boyolali', 'KABUPATEN BOYOLALI' akan digabung menjadi satu nilai. Menggunakan fuzzy matching dengan threshold 80%.",
         "text_format": "Aktifkan untuk menjaga format teks di kolom tertentu agar tidak terkonversi menjadi angka oleh Excel. Contoh: NIK '0012345678901234' tidak berubah jadi '1.2345E+15'.",
         "select_columns": "Pilih kolom yang perlu diformat sebagai teks. Sistem akan otomatis mendeteksi kolom yang mengandung keyword seperti: NIK, KK, NO. HP, TANGGAL, SK, BAST.",
         "select_all": "Centang untuk memilih semua kolom. Batalkan centang untuk membatalkan semua pilihan.",
@@ -784,6 +785,69 @@ def _auto_detect_text_columns(columns: list) -> set:
                 detected.add(col)
                 break
     return detected
+
+
+def _normalize_for_comparison(val: str) -> str:
+    """Normalize value for fuzzy comparison."""
+    val = str(val).lower().strip()
+    val = val.replace(".", "").replace(",", "")
+    val = val.replace("  ", " ")
+    return val
+
+
+def _get_similarity(s1: str, s2: str) -> float:
+    """Calculate similarity ratio between two strings."""
+    from difflib import SequenceMatcher
+    return SequenceMatcher(None, s1, s2).ratio()
+
+
+def _fuzzy_group_values(unique_values: list, frequency_map: dict, threshold: float = 0.80) -> dict:
+    """
+    Group similar values using fuzzy matching.
+    Returns dict: {winner_value: [list of member values]}
+    """
+    if not unique_values:
+        return {}
+    
+    values_to_check = list(unique_values)
+    clusters = {}
+    used = set()
+    
+    for i, val in enumerate(values_to_check):
+        if val in used:
+            continue
+        
+        cluster = [val]
+        used.add(val)
+        val_normalized = _normalize_for_comparison(val)
+        
+        for j, other in enumerate(values_to_check):
+            if other in used or i == j:
+                continue
+            
+            other_normalized = _normalize_for_comparison(other)
+            
+            similarity = _get_similarity(val_normalized, other_normalized)
+            
+            if similarity >= threshold:
+                cluster.append(other)
+                used.add(other)
+        
+        winner = max(cluster, key=lambda x: frequency_map.get(x, 0))
+        clusters[winner] = cluster
+    
+    return clusters
+
+
+def _apply_cleaning_to_df(df: pd.DataFrame, col: str, clusters: dict) -> pd.DataFrame:
+    """Apply cleaning by replacing values with their winner."""
+    df = df.copy()
+    value_mapping = {}
+    for winner, members in clusters.items():
+        for member in members:
+            value_mapping[member] = winner
+    df[col] = df[col].replace(value_mapping)
+    return df
 
 
 def _enforce_text_format_in_memory(excel_bytes: bytes, sheet_name: str, selected_columns: set) -> bytes:
@@ -907,6 +971,7 @@ def render_split_page():
             df_stats = df_full
             
             unique_vals = [v for v in df_stats[target_split_col].unique() if str(v).strip() not in ("", "nan", "None")]
+            freq_map = df_stats[target_split_col].value_counts().to_dict()
             
             col_stat1, col_stat2, col_stat3 = st.columns(3)
             col_stat1.metric("Total Baris Data", len(df_stats))
@@ -917,6 +982,114 @@ def render_split_page():
                 st.warning(f"⚠️ Perhatian: Akan ada {len(unique_vals)} file output. Proses mungkin memerlukan waktu lama.")
             
             st.info(_get_help_text("preview_stats"))
+            
+            enable_auto_clean = st.checkbox(
+                "☑ Aktifkan Auto Cleaning (Fuzzy Match)",
+                value=False,
+                help="Gabungkan nilai yang serupa (misal: 'kab. boyolali' dan 'kabupaten boyolali') menjadi satu"
+            )
+            
+            clusters = {}
+            cleaned_unique_count = len(unique_vals)
+            
+            if enable_auto_clean:
+                clusters = _fuzzy_group_values(unique_vals, freq_map, threshold=0.80)
+                cleaned_unique_count = len(clusters)
+            
+            if enable_auto_clean and clusters:
+                st.divider()
+                st.subheader(f"📋 Preview Auto Cleaning: {target_split_col}")
+                
+                cluster_list = list(clusters.items())
+                cluster_list.sort(key=lambda x: len(x[1]), reverse=True)
+                
+                col_stat_clean1, col_stat_clean2, col_stat_clean3 = st.columns(3)
+                col_stat_clean1.metric("Klaster Ditemukan", len(clusters))
+                col_stat_clean2.metric("Estimasi Penggabungan", len(unique_vals) - cleaned_unique_count)
+                col_stat_clean3.metric("Estimasi File Output", cleaned_unique_count)
+                
+                st.caption("💡 Suggestion = nilai yang paling sering muncul di data")
+                
+                PREVIEW_LIMIT = 15
+                show_all = st.checkbox("Tampilkan semua klaster", value=False)
+                
+                user_winner_picks = {}
+                
+                preview_clusters = cluster_list[:PREVIEW_LIMIT] if not show_all else cluster_list
+                remaining_clusters = cluster_list[PREVIEW_LIMIT:] if not show_all else []
+                
+                for winner, members in preview_clusters:
+                    if len(members) > 1:
+                        with st.container():
+                            st.markdown(f"**Cluster ({len(members)} nilai):**")
+                            member_display = ", ".join([f"`{m}`" for m in members])
+                            st.caption(member_display)
+                            
+                            freq_sorted = sorted(members, key=lambda x: freq_map.get(x, 0), reverse=True)
+                            options = freq_sorted
+                            
+                            default_idx = 0
+                            selected = st.selectbox(
+                                f"Pilih winner:",
+                                options=options,
+                                index=default_idx,
+                                key=f"winner_{winner}"
+                            )
+                            user_winner_picks[winner] = selected
+                            
+                            with st.expander(" atau ketik manual...", expanded=False):
+                                manual_input = st.text_input(
+                                    "Ketik winner manual:",
+                                    value="",
+                                    key=f"manual_{winner}"
+                                )
+                                if manual_input.strip():
+                                    user_winner_picks[winner] = manual_input.strip()
+                            
+                            st.markdown("---")
+                
+                if remaining_clusters:
+                    with st.expander(f"▶ Lihat {len(remaining_clusters)} klaster lainnya"):
+                        for winner, members in remaining_clusters:
+                            if len(members) > 1:
+                                with st.container():
+                                    st.markdown(f"**Cluster ({len(members)} nilai):**")
+                                    member_display = ", ".join([f"`{m}`" for m in members])
+                                    st.caption(member_display)
+                                    
+                                    freq_sorted = sorted(members, key=lambda x: freq_map.get(x, 0), reverse=True)
+                                    options = freq_sorted
+                                    
+                                    default_idx = 0
+                                    selected = st.selectbox(
+                                        f"Pilih winner:",
+                                        options=options,
+                                        index=default_idx,
+                                        key=f"winner_{winner}_remaining"
+                                    )
+                                    user_winner_picks[winner] = selected
+                                    
+                                    with st.expander(" atau ketik manual...", expanded=False):
+                                        manual_input = st.text_input(
+                                            "Ketik winner manual:",
+                                            value="",
+                                            key=f"manual_{winner}_remaining"
+                                        )
+                                        if manual_input.strip():
+                                            user_winner_picks[winner] = manual_input.strip()
+                                    
+                                    st.markdown("---")
+                
+                final_clusters = {}
+                for winner, members in clusters.items():
+                    picked_winner = user_winner_picks.get(winner, winner)
+                    if picked_winner not in final_clusters:
+                        final_clusters[picked_winner] = []
+                    for m in members:
+                        if m != picked_winner:
+                            final_clusters[picked_winner].append(m)
+                
+                cleaned_unique_count = len(final_clusters)
 
             st.divider()
             st.subheader("⚙️ Pengaturan Format")
@@ -971,6 +1144,9 @@ def render_split_page():
                 try:
                     df_split_data = df_full
                     split_column = target_split_col
+                    
+                    if enable_auto_clean and final_clusters:
+                        df_split_data = _apply_cleaning_to_df(df_split_data, split_column, final_clusters)
                     
                     df_split_data = df_split_data.fillna("")
                     
