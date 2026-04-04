@@ -805,20 +805,54 @@ def _tokenize(val: str) -> set:
     return tokens
 
 
-def _majority_tokens_match(tokens1: set, tokens2: set, threshold: float = 0.50) -> bool:
-    """Check if majority of tokens match between two values."""
-    if not tokens1 or not tokens2:
-        return False
+def _get_common_prefix_len(s1: str, s2: str) -> int:
+    """Get length of common prefix between two strings."""
+    common_len = 0
+    for c1, c2 in zip(s1, s2):
+        if c1 == c2:
+            common_len += 1
+        else:
+            break
+    return common_len
+
+
+def _remaining_similarity(s1: str, s2: str) -> float:
+    """
+    Calculate similarity of the non-common parts (after common prefix).
+    This prevents 'KABUPATEN BANTUL' matching 'KABUPATEN SLEMAN'.
+    """
+    prefix_len = _get_common_prefix_len(s1, s2)
+    
+    rem1 = s1[prefix_len:]
+    rem2 = s2[prefix_len:]
+    
+    if len(rem1) < 3 or len(rem2) < 3:
+        return 0.0
+    
+    from difflib import SequenceMatcher
+    return SequenceMatcher(None, rem1, rem2).ratio()
+
+
+def _non_common_token_match(tokens1: set, tokens2: set) -> bool:
+    """
+    Check if non-common tokens have meaningful match.
+    Returns True only if tokens share at least one significant common token
+    that is NOT just a common prefix word like 'kabupaten', 'kecamatan', etc.
+    """
+    COMMON_PREFIX_TOKENS = {
+        "kabupaten", "kota", "kecamatan", "kelurahan", "desa", "dusun",
+        "provinsi", "kec", "kel", "kab", "ds", "kabupaten kota"
+    }
     
     intersection = tokens1 & tokens2
-    min_tokens = min(len(tokens1), len(tokens2))
     
-    if min_tokens == 0:
-        return False
+    non_common_match = False
+    for token in intersection:
+        if token not in COMMON_PREFIX_TOKENS:
+            non_common_match = True
+            break
     
-    match_ratio = len(intersection) / min_tokens
-    
-    return match_ratio >= threshold
+    return non_common_match
 
 
 def _string_similarity(s1: str, s2: str) -> float:
@@ -829,9 +863,10 @@ def _string_similarity(s1: str, s2: str) -> float:
 
 def _is_similar(val1: str, val2: str) -> bool:
     """
-    Hybrid matching: 
-    - If majority tokens match (>=50%) -> similar
-    - OR if string similarity is high (>=70%) -> similar
+    Conservative matching:
+    - Require non-common tokens to match, OR
+    - Remaining parts after common prefix to be similar
+    This prevents 'KABUPATEN BANTUL' matching 'KABUPATEN SLEMAN'.
     """
     val1_norm = _normalize_for_fuzzy(val1)
     val2_norm = _normalize_for_fuzzy(val2)
@@ -839,10 +874,10 @@ def _is_similar(val1: str, val2: str) -> bool:
     tokens1 = _tokenize(val1)
     tokens2 = _tokenize(val2)
     
-    if _majority_tokens_match(tokens1, tokens2, threshold=0.50):
+    if _non_common_token_match(tokens1, tokens2):
         return True
     
-    if _string_similarity(val1_norm, val2_norm) >= 0.70:
+    if _remaining_similarity(val1_norm, val2_norm) >= 0.60:
         return True
     
     return False
