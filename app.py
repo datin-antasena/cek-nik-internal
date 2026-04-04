@@ -797,31 +797,56 @@ def _tokenize(val: str) -> set:
     return tokens
 
 
-COMMON_PREFIX_TOKENS = {
-    "kabupaten", "kota", "kecamatan", "kelurahan", "desa", "dusun",
-    "provinsi", "kec", "kel", "kab", "ds", "kabupaten kota"
+ADMIN_TYPE_TOKENS = {
+    "kabupaten": "kabupaten",
+    "kota": "kota",
+    "kecamatan": "kecamatan",
+    "kelurahan": "kelurahan",
+    "desa": "desa",
+    "kab": "kabupaten",
+    "kec": "kecamatan",
+    "kel": "kelurahan",
+    "ds": "desa",
 }
+
+
+def _get_admin_type(tokens: set) -> str:
+    """Extract admin type from tokens. Returns normalized type or None."""
+    for token in tokens:
+        if token in ADMIN_TYPE_TOKENS:
+            return ADMIN_TYPE_TOKENS[token]
+    return None
 
 
 def _is_similar(val1: str, val2: str) -> bool:
     """
-    Token-based matching: values are similar ONLY if they share 
-    at least one non-prefix token (e.g., 'boyolali', 'magelang').
+    Token-based matching with admin type compatibility check.
     
-    This prevents:
-    - 'KABUPATEN BANTUL' matching 'KABUPATEN SLEMAN' (bantul ≠ sleman)
-    - 'KAB. MAGELANG' matching 'KAB. SEMARANG' (magelang ≠ semarang)
+    Rules:
+    - Both must have admin types AND types must be compatible (same or expandable)
+    - Non-type tokens must match
     
-    But still matches:
-    - 'kab. boyolali' with 'kabupaten boyolali' (share 'boyolali')
+    Prevents:
+    - 'KABUPATEN MAGELANG' matching 'KOTA MAGELANG' (different type)
+    
+    Allows:
+    - 'kab. boyolali' with 'kabupaten boyolali' (same type: kabupaten)
     """
     tokens1 = _tokenize(val1)
     tokens2 = _tokenize(val2)
     
-    intersection = tokens1 & tokens2
-    non_prefix_intersection = intersection - COMMON_PREFIX_TOKENS
+    type1 = _get_admin_type(tokens1)
+    type2 = _get_admin_type(tokens2)
     
-    return bool(non_prefix_intersection)
+    if type1 and type2 and type1 != type2:
+        return False
+    
+    non_type_tokens1 = tokens1 - set(ADMIN_TYPE_TOKENS.keys())
+    non_type_tokens2 = tokens2 - set(ADMIN_TYPE_TOKENS.keys())
+    
+    intersection = non_type_tokens1 & non_type_tokens2
+    
+    return bool(intersection)
 
 
 def _fuzzy_group_values(unique_values: list, frequency_map: dict) -> dict:
