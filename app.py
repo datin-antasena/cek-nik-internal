@@ -1019,7 +1019,7 @@ def render_split_page():
             cleaned_unique_count = len(unique_vals)
             
             if enable_auto_clean:
-                clusters = _fuzzy_group_values(unique_vals, freq_map, threshold=0.80)
+                clusters = _fuzzy_group_values(unique_vals, freq_map, token_threshold=0.60)
                 cleaned_unique_count = len(clusters)
             
             if enable_auto_clean and clusters:
