@@ -1,5 +1,4 @@
 import io
-import os
 import re as _re
 import zipfile
 import time
@@ -9,12 +8,17 @@ from zoneinfo import ZoneInfo
 
 from dateutil import parser as dateutil_parser
 
-import gspread
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from openpyxl import load_workbook
-from google.oauth2.service_account import Credentials
+from services.export_helpers import (
+    _enforce_text_format_in_memory,
+    bersihkan_nama_file,
+    buat_excel_buffer,
+)
+from services.file_loading import baca_data_penuh, baca_preview_mentah, siapkan_dataframe
+from services.logging_utils import catat_log
+from services.reference_data import ambil_data_salur_gspread
 
 
 # ─── CONFIG ───────────────────────────────────────────────────────────────────
@@ -86,51 +90,8 @@ TEXT_COLUMNS_KEYWORDS = [
 
 # ─── DATA FETCHING ─────────────────────────────────────────────────────────────
 
-@st.cache_data(ttl=3600)
-def ambil_data_salur_gspread():
-    try:
-        scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
-        creds = Credentials.from_service_account_info(
-            st.secrets["gcp_service_account"], scopes=scopes
-        )
-        client = gspread.authorize(creds)
-        sheet = client.open_by_key(st.secrets["SPREADSHEET_ID"]).worksheet("BNBA")
-
-        kolom_nik = sheet.col_values(4)
-        set_nik_salur = {str(nik).strip() for nik in kolom_nik[1:] if nik}
-        waktu_update = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%d %b %Y, %H:%M:%S WIB")
-
-        return set_nik_salur, waktu_update
-
-    except Exception as e:
-        return set(), f"Gagal mengambil data: {e}"
-
 
 # ─── LOGGING ──────────────────────────────────────────────────────────────────
-
-def catat_log(nama_file, nama_sheet, rincian_per_kolom):
-    waktu = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M:%S")
-    summary_text = ""
-
-    for col, stats in rincian_per_kolom.items():
-        simple_stats = {}
-        ganda_total = 0
-        for k, v in stats.items():
-            if str(k).startswith("GANDA"):
-                ganda_total += v
-            else:
-                simple_stats[k] = v
-        if ganda_total > 0:
-            simple_stats["GANDA (TOTAL)"] = ganda_total
-
-        stat_str = ", ".join(f"{k}:{v}" for k, v in simple_stats.items())
-        summary_text += f"[{col}: {stat_str}] "
-
-    pesan = (
-        f"[{waktu}] FILE: {nama_file} | SHEET: {nama_sheet} | DETAIL: {summary_text}\n"
-    )
-    with open("activity_log.txt", "a") as f:
-        f.write(pesan)
 
 
 # ─── VALIDATION LOGIC ─────────────────────────────────────────────────────────
@@ -458,27 +419,6 @@ def render_filtered_table_usia(df_result, kategori_cols):
     return df_display
 
 
-def buat_excel_buffer(df_result, selected_sheet):
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-        sheet_name = f"Cek_{selected_sheet}"[:30]
-        df_result.to_excel(writer, index=False, sheet_name=sheet_name)
-
-        wb = writer.book
-        ws = writer.sheets[sheet_name]
-        txt_fmt = wb.add_format({"num_format": "@"})
-        for idx in range(len(df_result.columns)):
-            ws.set_column(idx, idx, 25, txt_fmt)
-
-    buffer.seek(0)
-    return buffer
-
-
-def bersihkan_nama_file(nama):
-    for ext in (".xlsx", ".xlsm", ".xls", ".csv"):
-        if nama.endswith(ext):
-            return nama[: -len(ext)]
-    return nama
 
 
 # ─── SIDEBAR (VALIDASI) ─────────────────────────────────────────────────────────
@@ -508,29 +448,6 @@ def render_sidebar(waktu_tarik):
 
 # ─── FILE READING (VALIDASI) ───────────────────────────────────────────────────
 
-def baca_preview_mentah(uploaded_file, selected_sheet, is_csv):
-    if is_csv:
-        uploaded_file.seek(0)
-        try:
-            return pd.read_csv(uploaded_file, header=None, nrows=10)
-        except Exception:
-            uploaded_file.seek(0)
-            return pd.read_csv(uploaded_file, header=None, nrows=10, sep=";")
-    else:
-        return pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=None, nrows=10, engine="openpyxl")
-
-
-def baca_data_penuh(uploaded_file, selected_sheet, is_csv, header_row_input):
-    header_idx = header_row_input - 1
-    if is_csv:
-        uploaded_file.seek(0)
-        try:
-            return pd.read_csv(uploaded_file, header=header_idx)
-        except Exception:
-            uploaded_file.seek(0)
-            return pd.read_csv(uploaded_file, header=header_idx, sep=";")
-    else:
-        return pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=header_idx, engine="openpyxl")
 
 
 # ─── VALIDASI PAGE ─────────────────────────────────────────────────────────────
@@ -587,14 +504,7 @@ def render_validasi_page():
             )
 
         df = baca_data_penuh(uploaded_file, selected_sheet, is_csv, header_row_input)
-        df.dropna(how="all", inplace=True)
-
-        if hapus_baris_penomoran and not df.empty:
-            df = df.iloc[1:].reset_index(drop=True)
-
-        df = df.astype(str)
-        for col in df.columns:
-            df[col] = df[col].replace("nan", "").str.replace(r"\.0$", "", regex=True)
+        df = siapkan_dataframe(df, hapus_baris_penomoran)
 
         st.divider()
         st.subheader("2. Pilih Kolom Data")
@@ -893,29 +803,6 @@ def _apply_cleaning_to_df(df: pd.DataFrame, col: str, clusters: dict) -> pd.Data
     return df
 
 
-def _enforce_text_format_in_memory(excel_bytes: bytes, sheet_name: str, selected_columns: set) -> bytes:
-    from io import BytesIO
-    wb = load_workbook(BytesIO(excel_bytes))
-    ws = wb[sheet_name]
-    
-    col_indices = {}
-    for col_cell in ws[1]:
-        if col_cell.value in selected_columns:
-            col_indices[col_cell.column] = col_cell.value
-    
-    if col_indices:
-        for col_idx in col_indices:
-            for row in ws.iter_rows(min_row=2, min_col=col_idx, max_col=col_idx):
-                for cell in row:
-                    if cell.value is not None:
-                        cell.value = str(cell.value).strip()
-                        cell.number_format = "@"
-    
-    output = BytesIO()
-    wb.save(output)
-    output.seek(0)
-    return output.getvalue()
-
 
 def render_split_page():
     st.title("📤 Split Workbook - Internal Antasena")
@@ -981,14 +868,7 @@ def render_split_page():
             )
         
         df_full = baca_data_penuh(uploaded_file, selected_sheet, is_csv, header_row_input)
-        df_full.dropna(how="all", inplace=True)
-        
-        if hapus_baris_penomoran and not df_full.empty:
-            df_full = df_full.iloc[1:].reset_index(drop=True)
-        
-        df_full = df_full.astype(str)
-        for col in df_full.columns:
-            df_full[col] = df_full[col].replace("nan", "").str.replace(r"\.0$", "", regex=True)
+        df_full = siapkan_dataframe(df_full, hapus_baris_penomoran)
         
         st.divider()
         
@@ -1293,3 +1173,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
