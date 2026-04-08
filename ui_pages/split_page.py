@@ -6,7 +6,11 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from services.export_helpers import _enforce_text_format_in_memory
+from services.export_helpers import (
+    _enforce_text_format_for_sheets_in_memory,
+    _enforce_text_format_in_memory,
+    sanitize_excel_sheet_name,
+)
 from services.file_loading import baca_data_penuh, baca_preview_mentah, siapkan_dataframe
 from services.validation_logic import apply_cleaning_to_df, fuzzy_group_values, get_help_text
 
@@ -88,13 +92,22 @@ def render_split_page():
             st.subheader("Preview Statistik")
             unique_vals = [v for v in df_full[target_split_col].unique() if str(v).strip() not in ("", "nan", "None")]
             freq_map = df_full[target_split_col].value_counts().to_dict()
+            output_mode = st.radio(
+                "Tipe Output:",
+                options=["Split ke banyak workbook", "Split ke banyak sheet dalam satu workbook"],
+                index=0,
+                horizontal=True,
+            )
+            is_multi_sheet_mode = output_mode == "Split ke banyak sheet dalam satu workbook"
+            output_count_label = "Estimasi Jumlah Sheet" if is_multi_sheet_mode else "Estimasi File Output"
 
             col_stat1, col_stat2, col_stat3 = st.columns(3)
             col_stat1.metric("Total Baris Data", len(df_full))
             col_stat2.metric("Unique Nilai Split", len(unique_vals))
-            col_stat3.metric("Estimasi File Output", len(unique_vals))
+            col_stat3.metric(output_count_label, len(unique_vals))
             if len(unique_vals) > 100:
-                st.warning(f"Perhatian: Akan ada {len(unique_vals)} file output. Proses mungkin memerlukan waktu lama.")
+                target_label = "sheet" if is_multi_sheet_mode else "file output"
+                st.warning(f"Perhatian: Akan ada {len(unique_vals)} {target_label}. Proses mungkin memerlukan waktu lama.")
             st.info(get_help_text("preview_stats"))
 
             enable_auto_clean = st.checkbox(
@@ -117,7 +130,7 @@ def render_split_page():
                 col_stat_clean1, col_stat_clean2, col_stat_clean3 = st.columns(3)
                 col_stat_clean1.metric("Klaster Ditemukan", len(clusters))
                 col_stat_clean2.metric("Estimasi Penggabungan", len(unique_vals) - cleaned_unique_count)
-                col_stat_clean3.metric("Estimasi File Output", cleaned_unique_count)
+                col_stat_clean3.metric(output_count_label, cleaned_unique_count)
                 st.caption("Suggestion = nilai yang paling sering muncul di data")
 
                 show_all = st.checkbox("Tampilkan semua klaster", value=False)
@@ -174,55 +187,101 @@ def render_split_page():
                     df_split_data = apply_cleaning_to_df(df_full, target_split_col, final_clusters) if enable_auto_clean and final_clusters else df_full
                     df_split_data = df_split_data.fillna("")
                     unique_vals = [v for v in df_split_data[target_split_col].unique() if str(v).strip() not in ("", "nan", "None")]
-                    total_files = len(unique_vals)
-                    zip_buffer = io.BytesIO()
+                    total_outputs = len(unique_vals)
 
-                    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-                        for i, val in enumerate(unique_vals):
-                            if st.session_state.split_state["cancel_requested"]:
-                                status_text.warning("Proses dibatalkan. Semua file yang sudah dibuat akan dihapus.")
-                                break
+                    if is_multi_sheet_mode:
+                        workbook_buffer = io.BytesIO()
+                        sheet_columns_map = {}
+                        used_sheet_names = []
 
-                            df_subset = df_split_data[df_split_data[target_split_col] == val].reset_index(drop=True)
-                            safe_name = str(val).strip()
-                            for char in ["/", "\\", ":", "*", "?", '"', "<", ">", "|"]:
-                                safe_name = safe_name.replace(char, "-")
-                            filename = f"{safe_name}.xlsx"
+                        with pd.ExcelWriter(workbook_buffer, engine="openpyxl") as writer:
+                            for i, val in enumerate(unique_vals):
+                                if st.session_state.split_state["cancel_requested"]:
+                                    status_text.warning("Proses dibatalkan. Semua sheet yang sudah dibuat akan dihapus.")
+                                    break
 
-                            temp_buffer = io.BytesIO()
-                            with pd.ExcelWriter(temp_buffer, engine="openpyxl") as writer:
-                                df_subset.to_excel(writer, index=False, sheet_name=selected_sheet)
-                            temp_buffer.seek(0)
+                                df_subset = df_split_data[df_split_data[target_split_col] == val].reset_index(drop=True)
+                                sheet_name = sanitize_excel_sheet_name(val, used_sheet_names)
+                                used_sheet_names.append(sheet_name)
+                                df_subset.to_excel(writer, index=False, sheet_name=sheet_name)
+                                sheet_columns_map[sheet_name] = set(checked_columns)
+                                st.session_state.split_state["files_created"].append(sheet_name)
 
+                                progress = int((i + 1) / total_outputs * 100)
+                                st.session_state.split_state["progress"] = progress
+                                progress_bar.progress(progress)
+                                progress_text.text(f"{i + 1}/{total_outputs} sheet ({progress}%)")
+
+                        if not st.session_state.split_state["cancel_requested"]:
+                            workbook_buffer.seek(0)
+                            workbook_bytes = workbook_buffer.getvalue()
                             if checked_columns:
-                                excel_bytes = _enforce_text_format_in_memory(temp_buffer.getvalue(), selected_sheet, set(checked_columns))
-                                zf.writestr(filename, excel_bytes)
-                            else:
-                                zf.writestr(filename, temp_buffer.getvalue())
+                                workbook_bytes = _enforce_text_format_for_sheets_in_memory(
+                                    workbook_bytes,
+                                    sheet_columns_map,
+                                )
+                    else:
+                        zip_buffer = io.BytesIO()
 
-                            st.session_state.split_state["files_created"].append(filename)
-                            progress = int((i + 1) / total_files * 100)
-                            st.session_state.split_state["progress"] = progress
-                            progress_bar.progress(progress)
-                            progress_text.text(f"{i + 1}/{total_files} files ({progress}%)")
+                        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                            for i, val in enumerate(unique_vals):
+                                if st.session_state.split_state["cancel_requested"]:
+                                    status_text.warning("Proses dibatalkan. Semua file yang sudah dibuat akan dihapus.")
+                                    break
+
+                                df_subset = df_split_data[df_split_data[target_split_col] == val].reset_index(drop=True)
+                                safe_name = str(val).strip()
+                                for char in ["/", "\\", ":", "*", "?", '"', "<", ">", "|"]:
+                                    safe_name = safe_name.replace(char, "-")
+                                filename = f"{safe_name}.xlsx"
+
+                                temp_buffer = io.BytesIO()
+                                with pd.ExcelWriter(temp_buffer, engine="openpyxl") as writer:
+                                    df_subset.to_excel(writer, index=False, sheet_name=selected_sheet)
+                                temp_buffer.seek(0)
+
+                                if checked_columns:
+                                    excel_bytes = _enforce_text_format_in_memory(temp_buffer.getvalue(), selected_sheet, set(checked_columns))
+                                    zf.writestr(filename, excel_bytes)
+                                else:
+                                    zf.writestr(filename, temp_buffer.getvalue())
+
+                                st.session_state.split_state["files_created"].append(filename)
+                                progress = int((i + 1) / total_outputs * 100)
+                                st.session_state.split_state["progress"] = progress
+                                progress_bar.progress(progress)
+                                progress_text.text(f"{i + 1}/{total_outputs} files ({progress}%)")
 
                     if not st.session_state.split_state["cancel_requested"]:
                         elapsed = time.time() - st.session_state.split_state["start_time"]
-                        zip_buffer.seek(0)
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                         st.divider()
-                        st.success(
-                            f"Selesai! {len(st.session_state.split_state['files_created'])} file berhasil dibuat ({elapsed:.1f} detik)"
-                        )
-                        st.download_button(
-                            label="Download Hasil Split (ZIP)",
-                            data=zip_buffer.getvalue(),
-                            file_name=f"split_result_{timestamp}.zip",
-                            mime="application/zip",
-                            use_container_width=True,
-                        )
+                        if is_multi_sheet_mode:
+                            st.success(
+                                f"Selesai! {len(st.session_state.split_state['files_created'])} sheet berhasil dibuat ({elapsed:.1f} detik)"
+                            )
+                            st.download_button(
+                                label="Download Hasil Split (Excel)",
+                                data=workbook_bytes,
+                                file_name=f"split_result_{timestamp}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True,
+                            )
+                        else:
+                            zip_buffer.seek(0)
+                            st.success(
+                                f"Selesai! {len(st.session_state.split_state['files_created'])} file berhasil dibuat ({elapsed:.1f} detik)"
+                            )
+                            st.download_button(
+                                label="Download Hasil Split (ZIP)",
+                                data=zip_buffer.getvalue(),
+                                file_name=f"split_result_{timestamp}.zip",
+                                mime="application/zip",
+                                use_container_width=True,
+                            )
                     else:
-                        zip_buffer.close()
+                        if not is_multi_sheet_mode:
+                            zip_buffer.close()
                 except Exception as e:
                     st.error(f"Terjadi kesalahan: {e}")
                 finally:
