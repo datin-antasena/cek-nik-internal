@@ -295,7 +295,7 @@ def render_validasi_page():
                 dayfirst = interpretasi_ambigu.startswith("Hari")
                 st.info(
                     f"**Aturan Kategorisasi:**\n- **ANAK**: Usia < 18 tahun\n- **DEWASA**: 18 <= Usia < 60 tahun\n"
-                    f"- **LANSIA**: Usia <= 60 tahun\n\nTanggal pengecekan: **{tgl_pengecekan_input.strftime('%d/%m/%Y')}** | "
+                    f"- **LANSIA**: Usia >= 60 tahun\n\nTanggal pengecekan: **{tgl_pengecekan_input.strftime('%d/%m/%Y')}** | "
                     f"Interpretasi ambigu: **{'dd/mm' if dayfirst else 'mm/dd'}**"
                 )
 

@@ -1,8 +1,8 @@
 import streamlit as st
 
 from config import STYLES
-from pages.split_page import render_split_page
-from pages.validasi_page import render_validasi_page
+from ui_pages.split_page import render_split_page
+from ui_pages.validasi_page import render_validasi_page
 
 st.set_page_config(page_title="Dashboard Validasi Data Sentra Antasena", layout="wide")
 
