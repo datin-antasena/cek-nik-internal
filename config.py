@@ -72,5 +72,5 @@ SPLIT_HELP_TEXT = {
     "select_all": "Centang untuk memilih semua kolom. Batalkan centang untuk membatalkan semua pilihan.",
     "process": "Memulai proses pemisahan file. File output akan dibundle dalam 1 file ZIP untuk download.",
     "cancel": "Membatalkan proses. Semua file yang sudah dibuat akan dihapus.",
-    "merge_upload": "Upload beberapa file Excel/CSV. Pilih satu workbook/sheet sebagai master, lalu mapping kolom dari sheet sumber ke struktur master.",
+    "merge_upload": "Upload workbook yang berisi tabel master. Sheet sumber bisa berasal dari sheet lain di workbook ini atau dari workbook sumber tambahan.",
 }

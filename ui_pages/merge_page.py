@@ -63,39 +63,31 @@ def render_merge_page():
     if "merge_result" not in st.session_state:
         st.session_state.merge_result = None
 
-    uploaded_files = st.file_uploader(
-        "Upload file Excel/CSV",
+    master_file = st.file_uploader(
+        "Upload workbook master",
         type=["xlsx", "xlsm", "xls", "csv"],
-        accept_multiple_files=True,
+        accept_multiple_files=False,
         help=get_help_text("merge_upload"),
+        key="merge_master_upload",
     )
-    if not uploaded_files:
+    if not master_file:
         st.session_state.merge_result = None
         st.session_state.merge_upload_signature = None
         st.write("<br><br>", unsafe_allow_html=True)
         return
 
-    upload_signature = tuple((uploaded_file.name, uploaded_file.size) for uploaded_file in uploaded_files)
-    if st.session_state.get("merge_upload_signature") != upload_signature:
-        st.session_state.merge_result = None
-        st.session_state.merge_upload_signature = upload_signature
-
-    sheet_catalog = _load_sheet_catalog(uploaded_files)
-    available_files = [idx for idx, info in sheet_catalog.items() if info["sheets"]]
-    if not available_files:
-        st.error("Tidak ada workbook/sheet yang bisa dibaca.")
+    st.subheader("1. Pilih Tabel Master")
+    master_catalog = _load_sheet_catalog([master_file])
+    if not master_catalog.get(0, {}).get("sheets"):
+        st.error("Workbook master tidak bisa dibaca.")
         return
 
-    st.subheader("1. Pilih Tabel Master")
     col_master_file, col_master_sheet, col_master_header = st.columns([2, 2, 1])
     with col_master_file:
-        master_file_idx = st.selectbox(
-            "Workbook master:",
-            options=available_files,
-            format_func=lambda idx: sheet_catalog[idx]["label"],
-        )
+        master_file_idx = 0
+        st.text_input("Workbook master:", value=master_catalog[master_file_idx]["label"], disabled=True)
     with col_master_sheet:
-        master_sheet = st.selectbox("Sheet master:", options=sheet_catalog[master_file_idx]["sheets"])
+        master_sheet = st.selectbox("Sheet master:", options=master_catalog[master_file_idx]["sheets"])
     with col_master_header:
         master_header_row = st.number_input("Header master di baris:", min_value=1, value=1)
 
@@ -106,7 +98,7 @@ def render_merge_page():
     )
 
     try:
-        master_df = read_workbook_sheet(uploaded_files[master_file_idx], master_sheet, master_header_row, hapus_baris_penomoran_master)
+        master_df = read_workbook_sheet(master_file, master_sheet, master_header_row, hapus_baris_penomoran_master)
     except Exception as exc:
         st.error(f"Gagal membaca tabel master: {exc}")
         return
@@ -120,6 +112,21 @@ def render_merge_page():
         st.dataframe(master_df.head(50), use_container_width=True)
 
     st.subheader("2. Pilih Sheet Sumber")
+    source_uploaded_files = st.file_uploader(
+        "Upload workbook sumber tambahan (opsional)",
+        type=["xlsx", "xlsm", "xls", "csv"],
+        accept_multiple_files=True,
+        help="Kosongkan jika sumber data ada di sheet lain pada workbook master. Upload di sini jika sumber data ada di workbook lain.",
+        key="merge_source_upload",
+    )
+    uploaded_files = [master_file] + list(source_uploaded_files or [])
+    upload_signature = tuple((uploaded_file.name, uploaded_file.size) for uploaded_file in uploaded_files)
+    if st.session_state.get("merge_upload_signature") != upload_signature:
+        st.session_state.merge_result = None
+        st.session_state.merge_upload_signature = upload_signature
+
+    sheet_catalog = _load_sheet_catalog(uploaded_files)
+    available_files = [idx for idx, info in sheet_catalog.items() if info["sheets"]]
     source_options = []
     source_lookup = {}
     for idx in available_files:
@@ -129,6 +136,12 @@ def render_merge_page():
             label = _source_label(sheet_catalog[idx]["label"], sheet_name)
             source_options.append(label)
             source_lookup[label] = (idx, sheet_name)
+
+    st.caption("Daftar sumber di bawah mencakup sheet lain dari workbook master dan semua sheet dari workbook sumber tambahan.")
+    if not source_options:
+        st.info("Belum ada sheet sumber. Tambahkan sheet lain pada workbook master atau upload workbook sumber tambahan di atas.")
+        st.write("<br><br>", unsafe_allow_html=True)
+        return
 
     selected_sources = st.multiselect(
         "Sheet yang akan diimport ke tabel master:",
