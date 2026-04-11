@@ -56,6 +56,53 @@ def _render_mapping_controls(master_columns, source_columns, source_label):
     return mapping
 
 
+def _build_merge_summary(
+    master_rows,
+    source_row_counts,
+    merged_df,
+    include_master_rows,
+    duplicate_key_columns,
+    validation_summary,
+):
+    duplicate_count = 0
+    if duplicate_key_columns and "MERGE_DUPLICATE_STATUS" in merged_df.columns:
+        duplicate_count = int((merged_df["MERGE_DUPLICATE_STATUS"] == "DUPLIKAT").sum())
+
+    required_empty_count = 0
+    if validation_summary is not None and not validation_summary.empty:
+        numeric_empty_counts = pd.to_numeric(validation_summary["Baris Kosong"], errors="coerce").fillna(0)
+        required_empty_count = int(numeric_empty_counts.sum())
+
+    return {
+        "master_rows": int(master_rows),
+        "source_sheet_count": len(source_row_counts),
+        "source_rows": int(sum(source_row_counts.values())),
+        "merged_rows": int(len(merged_df)),
+        "included_master_rows": bool(include_master_rows),
+        "duplicate_count": duplicate_count,
+        "required_empty_count": required_empty_count,
+        "source_row_counts": source_row_counts,
+    }
+
+
+def _render_merge_summary(summary):
+    st.subheader("Rekapitulasi Proses")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Baris Master", summary["master_rows"] if summary["included_master_rows"] else 0)
+    col2.metric("Source Sheet", summary["source_sheet_count"])
+    col3.metric("Baris Source", summary["source_rows"])
+    col4.metric("Total Baris Hasil", summary["merged_rows"])
+
+    col5, col6 = st.columns(2)
+    col5.metric("Baris Duplikat", summary["duplicate_count"])
+    col6.metric("Kosong di Kolom Wajib", summary["required_empty_count"])
+
+    source_rows = [{"Sheet Sumber": label, "Jumlah Baris": count} for label, count in summary["source_row_counts"].items()]
+    if source_rows:
+        with st.expander("Detail baris per source sheet", expanded=False):
+            st.dataframe(pd.DataFrame(source_rows), use_container_width=True, hide_index=True)
+
+
 def render_merge_page():
     st.title("Merge Workbook - Internal Antasena")
     st.caption("Gabungkan beberapa workbook/sheet ke satu sheet berdasarkan struktur kolom tabel master.")
@@ -205,16 +252,32 @@ def render_merge_page():
 
     if st.button("PROSES MERGE", use_container_width=True):
         try:
+            progress_bar = st.progress(0)
+            progress_text = st.empty()
             merged_parts = []
             master_label = _source_label(sheet_catalog[master_file_idx]["label"], master_sheet)
+            total_steps = len(source_dataframes) + 4
+            current_step = 0
+
+            def update_progress(message):
+                nonlocal current_step
+                current_step += 1
+                progress = min(int(current_step / total_steps * 100), 100)
+                progress_bar.progress(progress)
+                progress_text.text(f"{message} ({progress}%)")
+
+            update_progress("Menyiapkan tabel master")
             if include_master_rows:
                 if include_source_metadata:
                     merged_parts.append(add_source_metadata_to_master(master_df, uploaded_files[master_file_idx].name, master_sheet))
                 else:
                     merged_parts.append(master_df.copy())
 
+            source_row_counts = {}
             for label, source_df in source_dataframes.items():
+                update_progress(f"Mapping source: {label}")
                 file_idx, sheet_name = source_lookup[label]
+                source_row_counts[label] = len(source_df)
                 mapped_df = map_source_to_master(
                     source_df,
                     master_columns,
@@ -225,10 +288,15 @@ def render_merge_page():
                 )
                 merged_parts.append(mapped_df)
 
+            update_progress("Menggabungkan seluruh data")
             merged_df = pd.concat(merged_parts, ignore_index=True) if merged_parts else pd.DataFrame(columns=master_columns)
             if duplicate_key_columns:
+                update_progress("Menandai data duplikat")
                 merged_df = mark_duplicates(merged_df, duplicate_key_columns)
+            else:
+                update_progress("Melewati deteksi duplikat")
 
+            update_progress("Mengecek kolom wajib")
             validation_summary = validate_required_columns(merged_df, required_columns)
             info_rows = build_info_process_rows(
                 master_label=master_label,
@@ -238,12 +306,33 @@ def render_merge_page():
                 validation_summary=validation_summary,
                 duplicate_key_columns=duplicate_key_columns,
             )
+            merge_summary = _build_merge_summary(
+                master_rows=len(master_df),
+                source_row_counts=source_row_counts,
+                merged_df=merged_df,
+                include_master_rows=include_master_rows,
+                duplicate_key_columns=duplicate_key_columns,
+                validation_summary=validation_summary,
+            )
+            info_rows.extend(
+                [
+                    {"Bagian": "Rekap Baris Master", "Detail": str(merge_summary["master_rows"] if include_master_rows else 0)},
+                    {"Bagian": "Rekap Source Sheet", "Detail": str(merge_summary["source_sheet_count"])},
+                    {"Bagian": "Rekap Baris Source", "Detail": str(merge_summary["source_rows"])},
+                    {"Bagian": "Rekap Baris Hasil", "Detail": str(merge_summary["merged_rows"])},
+                    {"Bagian": "Rekap Baris Duplikat", "Detail": str(merge_summary["duplicate_count"])},
+                    {"Bagian": "Rekap Kosong Kolom Wajib", "Detail": str(merge_summary["required_empty_count"])},
+                ]
+            )
             buffer = buat_merge_excel_buffer(merged_df, info_rows)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            progress_bar.progress(100)
+            progress_text.text("Merge selesai (100%)")
 
             st.session_state.merge_result = {
                 "df": merged_df,
                 "validation_summary": validation_summary,
+                "summary": merge_summary,
                 "buffer": buffer.getvalue(),
                 "file_name": f"merge_result_{timestamp}.xlsx",
             }
@@ -252,6 +341,8 @@ def render_merge_page():
 
     result = st.session_state.merge_result
     if result:
+        st.divider()
+        _render_merge_summary(result["summary"])
         st.divider()
         st.subheader("Preview Hasil Merge")
         st.caption(f"Total baris hasil: {len(result['df'])}")
