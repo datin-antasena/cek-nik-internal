@@ -46,3 +46,9 @@ def siapkan_dataframe(df, hapus_baris_penomoran):
         df[col] = df[col].replace("nan", "").str.replace(r"\.0$", "", regex=True)
 
     return df
+
+
+def tampilkan_nomor_baris_excel(df):
+    df_preview = df.copy()
+    df_preview.insert(0, "Nomor Baris Excel", range(1, len(df_preview) + 1))
+    return df_preview

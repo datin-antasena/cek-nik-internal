@@ -7,7 +7,7 @@ import streamlit as st
 
 from config import COLOR_MAP, COLOR_MAP_KATEGORI, STYLES
 from services.export_helpers import bersihkan_nama_file, buat_excel_buffer
-from services.file_loading import baca_data_penuh, baca_preview_mentah, siapkan_dataframe
+from services.file_loading import baca_data_penuh, baca_preview_mentah, siapkan_dataframe, tampilkan_nomor_baris_excel
 from services.logging_utils import catat_log
 from services.reference_data import ambil_data_salur_gspread
 from services.validation_logic import proses_kolom, proses_kolom_usia
@@ -207,7 +207,7 @@ def render_validasi_page():
 
     try:
         is_csv = uploaded_file.name.endswith(".csv")
-        daftar_sheet = ["Sheet1"] if is_csv else pd.ExcelFile(uploaded_file, engine="openpyxl").sheet_names
+        daftar_sheet = ["Sheet1"] if is_csv else pd.ExcelFile(uploaded_file).sheet_names
 
         st.subheader("1. Konfigurasi File")
         col_sheet, col_header_row = st.columns([2, 1])
@@ -220,9 +220,8 @@ def render_validasi_page():
 
         df_preview_raw = baca_preview_mentah(uploaded_file, selected_sheet, is_csv).fillna("")
         with st.expander("Klik untuk melihat Preview Data Mentah (Cek posisi Header)", expanded=False):
-            st.caption("Baris ke berapa Header tabel Anda?")
-            df_preview_raw.index += 1
-            st.dataframe(df_preview_raw, use_container_width=True)
+            st.caption("Gunakan angka di kolom 'Nomor Baris Excel' sebagai input Header Table.")
+            st.dataframe(tampilkan_nomor_baris_excel(df_preview_raw), use_container_width=True, hide_index=True)
 
         with col_header_row:
             header_row_input = st.number_input("Header Table ada di baris ke:", min_value=1, value=1)

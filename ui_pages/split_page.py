@@ -11,7 +11,7 @@ from services.export_helpers import (
     _enforce_text_format_in_memory,
     sanitize_excel_sheet_name,
 )
-from services.file_loading import baca_data_penuh, baca_preview_mentah, siapkan_dataframe
+from services.file_loading import baca_data_penuh, baca_preview_mentah, siapkan_dataframe, tampilkan_nomor_baris_excel
 from services.split_logic import build_output_path, build_sheet_label, build_split_summary, iter_split_groups
 from services.validation_logic import apply_cleaning_to_df, fuzzy_group_values, get_help_text
 
@@ -115,9 +115,8 @@ def render_split_page():
 
         df_preview_raw = baca_preview_mentah(uploaded_file, selected_sheet, is_csv).fillna("")
         with st.expander("Klik untuk melihat Preview Data Mentah (Cek posisi Header)", expanded=False):
-            st.caption("Baris ke berapa Header tabel Anda?")
-            df_preview_raw.index += 1
-            st.dataframe(df_preview_raw, use_container_width=True)
+            st.caption("Gunakan angka di kolom 'Nomor Baris Excel' sebagai input Header Table.")
+            st.dataframe(tampilkan_nomor_baris_excel(df_preview_raw), use_container_width=True, hide_index=True)
 
         with col_header_row:
             header_row_input = st.number_input("Header Table ada di baris ke:", min_value=1, value=1, help=get_help_text("header_row"))
