@@ -48,6 +48,33 @@ def buat_merge_excel_buffer(df_result, info_rows=None):
     return buffer
 
 
+def _format_text_sheet(writer, sheet_name, width=25):
+    ws = writer.book[sheet_name]
+    for idx in range(1, ws.max_column + 1):
+        col_letter = get_column_letter(idx)
+        ws.column_dimensions[col_letter].width = width
+        for cell in ws[col_letter]:
+            cell.number_format = "@"
+
+
+def buat_merge_error_report_buffer(error_frames: dict[str, pd.DataFrame]):
+    buffer = io.BytesIO()
+    sheet_map = {
+        "REKAP_ERROR": error_frames.get("error_summary_df", pd.DataFrame()),
+        "DUPLIKAT": error_frames.get("duplicate_df", pd.DataFrame()),
+        "KUNCI_KOSONG": error_frames.get("empty_key_df", pd.DataFrame()),
+        "KOLOM_WAJIB_KOSONG": error_frames.get("required_empty_df", pd.DataFrame()),
+    }
+
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        for sheet_name, df in sheet_map.items():
+            df.to_excel(writer, index=False, sheet_name=sheet_name)
+            _format_text_sheet(writer, sheet_name, width=28 if sheet_name == "REKAP_ERROR" else 25)
+
+    buffer.seek(0)
+    return buffer
+
+
 def bersihkan_nama_file(nama):
     for ext in (".xlsx", ".xlsm", ".xls", ".csv"):
         if nama.endswith(ext):

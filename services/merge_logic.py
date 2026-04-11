@@ -1,4 +1,6 @@
 from datetime import datetime
+from difflib import SequenceMatcher
+import re
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -10,6 +12,19 @@ SOURCE_FILE_COL = "SOURCE_FILE"
 SOURCE_SHEET_COL = "SOURCE_SHEET"
 SOURCE_ROW_COL = "SOURCE_ROW"
 DUPLICATE_STATUS_COL = "MERGE_DUPLICATE_STATUS"
+
+COLUMN_ALIASES = {
+    "nik": {"nik", "nikpm", "nikpenerimamanfaat", "noktp", "nomorktp"},
+    "nama": {"nama", "namalengkap", "namapm", "namapenerimamanfaat", "namapenerima"},
+    "nokk": {"nokk", "kk", "nomorkk", "nokartukeluarga", "kartukeluarga"},
+    "provinsi": {"provinsi", "prov", "propinsi", "province"},
+    "kabupaten": {"kabupaten", "kabkota", "kab", "kota", "kabupatenkota"},
+    "kecamatan": {"kecamatan", "kec"},
+    "kelurahan": {"kelurahan", "desa", "kel", "ds"},
+    "alamat": {"alamat", "address"},
+    "tanggal_lahir": {"tanggallahir", "tgllahir", "dob", "lahir"},
+    "no_hp": {"nohp", "nomorhp", "hp", "telepon", "telp", "nomortelepon"},
+}
 
 
 def is_csv_file(file_name: str) -> bool:
@@ -41,11 +56,46 @@ def read_workbook_sheet(uploaded_file, sheet_name: str, header_row: int, hapus_b
     return siapkan_dataframe(df, hapus_baris_penomoran)
 
 
+def normalize_column_name(column_name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(column_name).lower())
+
+
+def _alias_key(column_name: str) -> str:
+    normalized = normalize_column_name(column_name)
+    for canonical, aliases in COLUMN_ALIASES.items():
+        if normalized == canonical or normalized in aliases:
+            return canonical
+    return normalized
+
+
+def _best_fuzzy_match(master_col: str, source_columns: list[str], threshold: float = 0.86) -> str:
+    master_norm = normalize_column_name(master_col)
+    best_source = ""
+    best_score = 0.0
+
+    for source_col in source_columns:
+        score = SequenceMatcher(None, master_norm, normalize_column_name(source_col)).ratio()
+        if score > best_score:
+            best_score = score
+            best_source = source_col
+
+    return best_source if best_score >= threshold else ""
+
+
 def default_column_mapping(master_columns: list[str], source_columns: list[str]) -> dict[str, str]:
     source_by_lower = {str(col).strip().lower(): col for col in source_columns}
+    source_by_normalized = {normalize_column_name(col): col for col in source_columns}
+    source_by_alias = {}
+    for source_col in source_columns:
+        source_by_alias.setdefault(_alias_key(source_col), source_col)
+
     mapping = {}
     for master_col in master_columns:
-        mapping[master_col] = source_by_lower.get(str(master_col).strip().lower(), "")
+        exact_match = source_by_lower.get(str(master_col).strip().lower(), "")
+        normalized_match = source_by_normalized.get(normalize_column_name(master_col), "")
+        alias_match = source_by_alias.get(_alias_key(master_col), "")
+        fuzzy_match = _best_fuzzy_match(master_col, source_columns)
+        mapping[master_col] = exact_match or normalized_match or alias_match or fuzzy_match
     return mapping
 
 
@@ -108,6 +158,44 @@ def mark_duplicates(df: pd.DataFrame, key_columns: list[str]) -> pd.DataFrame:
     result.loc[duplicate_mask, DUPLICATE_STATUS_COL] = "DUPLIKAT"
     result.loc[has_empty_key, DUPLICATE_STATUS_COL] = "KUNCI KOSONG"
     return result
+
+
+def build_merge_error_frames(
+    df: pd.DataFrame,
+    required_columns: list[str],
+    duplicate_key_columns: list[str],
+) -> dict[str, pd.DataFrame]:
+    duplicate_df = pd.DataFrame()
+    empty_key_df = pd.DataFrame()
+    required_empty_df = pd.DataFrame()
+
+    if duplicate_key_columns and DUPLICATE_STATUS_COL in df.columns:
+        duplicate_df = df[df[DUPLICATE_STATUS_COL] == "DUPLIKAT"].copy()
+        empty_key_df = df[df[DUPLICATE_STATUS_COL] == "KUNCI KOSONG"].copy()
+
+    if required_columns:
+        masks = []
+        for col in required_columns:
+            if col in df.columns:
+                masks.append(df[col].astype(str).str.strip().isin(["", "nan", "None"]))
+        if masks:
+            required_mask = masks[0]
+            for mask in masks[1:]:
+                required_mask = required_mask | mask
+            required_empty_df = df[required_mask].copy()
+
+    summary_rows = [
+        {"Jenis Error": "DUPLIKAT", "Jumlah Baris": len(duplicate_df)},
+        {"Jenis Error": "KUNCI DUPLIKAT KOSONG", "Jumlah Baris": len(empty_key_df)},
+        {"Jenis Error": "KOLOM WAJIB KOSONG", "Jumlah Baris": len(required_empty_df)},
+    ]
+    error_summary_df = pd.DataFrame(summary_rows)
+    return {
+        "duplicate_df": duplicate_df,
+        "empty_key_df": empty_key_df,
+        "required_empty_df": required_empty_df,
+        "error_summary_df": error_summary_df,
+    }
 
 
 def build_info_process_rows(

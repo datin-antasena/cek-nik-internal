@@ -3,9 +3,10 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from services.export_helpers import buat_merge_excel_buffer
+from services.export_helpers import buat_merge_error_report_buffer, buat_merge_excel_buffer
 from services.merge_logic import (
     add_source_metadata_to_master,
+    build_merge_error_frames,
     build_info_process_rows,
     default_column_mapping,
     get_sheet_names,
@@ -109,6 +110,11 @@ def render_merge_page():
 
     if "merge_result" not in st.session_state:
         st.session_state.merge_result = None
+
+    if st.button("RESET PROSES MERGE", use_container_width=True):
+        st.session_state.merge_result = None
+        st.session_state.merge_upload_signature = None
+        st.rerun()
 
     master_file = st.file_uploader(
         "Upload workbook master",
@@ -316,6 +322,11 @@ def render_merge_page():
             )
             info_rows.extend(
                 [
+                    {"Bagian": "Header Row Master", "Detail": str(master_header_row)},
+                    {"Bagian": "Header Row Source", "Detail": str(source_header_row)},
+                    {"Bagian": "Sertakan Baris Master", "Detail": "Ya" if include_master_rows else "Tidak"},
+                    {"Bagian": "Tambahkan Metadata Source", "Detail": "Ya" if include_source_metadata else "Tidak"},
+                    {"Bagian": "Kolom Wajib", "Detail": ", ".join(required_columns) or "-"},
                     {"Bagian": "Rekap Baris Master", "Detail": str(merge_summary["master_rows"] if include_master_rows else 0)},
                     {"Bagian": "Rekap Source Sheet", "Detail": str(merge_summary["source_sheet_count"])},
                     {"Bagian": "Rekap Baris Source", "Detail": str(merge_summary["source_rows"])},
@@ -324,7 +335,12 @@ def render_merge_page():
                     {"Bagian": "Rekap Kosong Kolom Wajib", "Detail": str(merge_summary["required_empty_count"])},
                 ]
             )
+            for source_label, row_count in source_row_counts.items():
+                info_rows.append({"Bagian": f"Rekap Source Rows {source_label}", "Detail": str(row_count)})
+
+            error_frames = build_merge_error_frames(merged_df, required_columns, duplicate_key_columns)
             buffer = buat_merge_excel_buffer(merged_df, info_rows)
+            error_report_buffer = buat_merge_error_report_buffer(error_frames)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             progress_bar.progress(100)
             progress_text.text("Merge selesai (100%)")
@@ -333,8 +349,11 @@ def render_merge_page():
                 "df": merged_df,
                 "validation_summary": validation_summary,
                 "summary": merge_summary,
+                "error_frames": error_frames,
                 "buffer": buffer.getvalue(),
+                "error_report_buffer": error_report_buffer.getvalue(),
                 "file_name": f"merge_result_{timestamp}.xlsx",
+                "error_report_file_name": f"merge_error_report_{timestamp}.xlsx",
             }
         except Exception as exc:
             st.error(f"Terjadi kesalahan saat merge: {exc}")
@@ -342,16 +361,57 @@ def render_merge_page():
     result = st.session_state.merge_result
     if result:
         st.divider()
-        _render_merge_summary(result["summary"])
+        if result.get("summary"):
+            _render_merge_summary(result["summary"])
         st.divider()
-        st.subheader("Preview Hasil Merge")
-        st.caption(f"Total baris hasil: {len(result['df'])}")
-        st.dataframe(result["df"].head(50), use_container_width=True)
+        st.subheader("Pemeriksaan Hasil")
+        error_frames = result.get("error_frames", {})
+        duplicate_df = error_frames.get("duplicate_df", pd.DataFrame())
+        empty_key_df = error_frames.get("empty_key_df", pd.DataFrame())
+        required_empty_df = error_frames.get("required_empty_df", pd.DataFrame())
+        error_summary_df = error_frames.get("error_summary_df", pd.DataFrame())
+
+        tab_hasil, tab_duplikat, tab_kunci_kosong, tab_wajib_kosong, tab_rekap = st.tabs(
+            ["Preview Hasil", "Duplikat", "Kunci Kosong", "Kolom Wajib Kosong", "Rekap Error"]
+        )
+        with tab_hasil:
+            st.caption(f"Total baris hasil: {len(result['df'])}")
+            st.dataframe(result["df"].head(50), use_container_width=True)
+        with tab_duplikat:
+            if duplicate_df.empty:
+                st.success("Tidak ada baris duplikat.")
+            else:
+                st.caption(f"Menampilkan {len(duplicate_df)} baris duplikat.")
+                st.dataframe(duplicate_df, use_container_width=True)
+        with tab_kunci_kosong:
+            if empty_key_df.empty:
+                st.success("Tidak ada baris dengan kunci duplikat kosong.")
+            else:
+                st.caption(f"Menampilkan {len(empty_key_df)} baris dengan kunci duplikat kosong.")
+                st.dataframe(empty_key_df, use_container_width=True)
+        with tab_wajib_kosong:
+            if required_empty_df.empty:
+                st.success("Tidak ada baris dengan kolom wajib kosong.")
+            else:
+                st.caption(f"Menampilkan {len(required_empty_df)} baris dengan kolom wajib kosong.")
+                st.dataframe(required_empty_df, use_container_width=True)
+        with tab_rekap:
+            st.dataframe(error_summary_df, use_container_width=True, hide_index=True)
 
         validation_summary = result.get("validation_summary")
         if validation_summary is not None and not validation_summary.empty:
             with st.expander("Ringkasan validasi kolom wajib", expanded=True):
                 st.dataframe(validation_summary, use_container_width=True)
+
+        has_error_rows = any(not frame.empty for frame in (duplicate_df, empty_key_df, required_empty_df))
+        if has_error_rows:
+            st.download_button(
+                label="Download Error Report (Excel)",
+                data=result["error_report_buffer"],
+                file_name=result["error_report_file_name"],
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
 
         st.download_button(
             label="Download Hasil Merge (Excel)",
