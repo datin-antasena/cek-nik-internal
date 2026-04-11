@@ -82,9 +82,55 @@ def _render_auto_clean_controls(df_full, split_columns, output_count_label):
     return enable_auto_clean, clean_target_col, final_clusters
 
 
+def _build_split_info_rows(
+    uploaded_file_name,
+    selected_sheet,
+    header_row_input,
+    split_columns,
+    output_mode,
+    total_rows,
+    total_outputs,
+    checked_columns,
+    clean_target_col,
+    output_key=None,
+    output_rows=None,
+):
+    rows = [
+        {"Bagian": "File Input", "Detail": uploaded_file_name},
+        {"Bagian": "Sheet Input", "Detail": selected_sheet},
+        {"Bagian": "Header Row", "Detail": str(header_row_input)},
+        {"Bagian": "Kolom Split", "Detail": " > ".join(split_columns)},
+        {"Bagian": "Mode Output", "Detail": output_mode},
+        {"Bagian": "Total Baris Input", "Detail": str(total_rows)},
+        {"Bagian": "Total Output", "Detail": str(total_outputs)},
+        {"Bagian": "Kolom Format Teks", "Detail": ", ".join(checked_columns) or "-"},
+        {"Bagian": "Auto Cleaning Kolom", "Detail": clean_target_col or "-"},
+        {"Bagian": "Waktu Proses", "Detail": datetime.now().strftime("%Y-%m-%d %H:%M:%S")},
+    ]
+    if output_key is not None:
+        rows.append({"Bagian": "Output Key", "Detail": " > ".join(output_key)})
+    if output_rows is not None:
+        rows.append({"Bagian": "Baris Output Ini", "Detail": str(output_rows)})
+    return rows
+
+
+def _write_info_sheet(writer, info_rows):
+    pd.DataFrame(info_rows).to_excel(writer, index=False, sheet_name="INFO_PROSES")
+
+
 def render_split_page():
     st.title("Split Workbook - Internal Antasena")
     st.caption("Pecah file Excel berdasarkan satu atau beberapa level kolom menjadi banyak file/sheet.")
+
+    if st.button("RESET PROSES SPLIT", use_container_width=True):
+        st.session_state.split_state = {
+            "processing": False,
+            "cancel_requested": False,
+            "progress": 0,
+            "files_created": [],
+            "start_time": None,
+        }
+        st.rerun()
 
     if "split_state" not in st.session_state:
         st.session_state.split_state = {
@@ -234,6 +280,17 @@ def render_split_page():
                 df_split_data = df_split_data.fillna("")
                 split_groups = iter_split_groups(df_split_data, split_columns)
                 total_outputs = len(split_groups)
+                base_info_rows = _build_split_info_rows(
+                    uploaded_file.name,
+                    selected_sheet,
+                    header_row_input,
+                    split_columns,
+                    output_mode,
+                    len(df_split_data),
+                    total_outputs,
+                    checked_columns,
+                    clean_target_col if enable_auto_clean and final_clusters else None,
+                )
 
                 if not total_outputs:
                     st.warning("Tidak ada data yang bisa diproses.")
@@ -242,7 +299,7 @@ def render_split_page():
                 if is_multi_sheet_mode:
                     workbook_buffer = io.BytesIO()
                     sheet_columns_map = {}
-                    used_sheet_names = []
+                    used_sheet_names = ["INFO_PROSES"]
 
                     with pd.ExcelWriter(workbook_buffer, engine="openpyxl") as writer:
                         for i, group in enumerate(split_groups):
@@ -260,6 +317,7 @@ def render_split_page():
                             st.session_state.split_state["progress"] = progress
                             progress_bar.progress(progress)
                             progress_text.text(f"{i + 1}/{total_outputs} sheet ({progress}%)")
+                        _write_info_sheet(writer, base_info_rows)
 
                     if not st.session_state.split_state["cancel_requested"]:
                         workbook_buffer.seek(0)
@@ -277,12 +335,31 @@ def render_split_page():
 
                             filename = build_output_path(group.key)
                             temp_buffer = io.BytesIO()
+                            data_sheet_name = selected_sheet[:31] or "DATA"
+                            if data_sheet_name.upper() == "INFO_PROSES":
+                                data_sheet_name = "DATA"
                             with pd.ExcelWriter(temp_buffer, engine="openpyxl") as writer:
-                                group.dataframe.to_excel(writer, index=False, sheet_name=selected_sheet[:31])
+                                group.dataframe.to_excel(writer, index=False, sheet_name=data_sheet_name)
+                                _write_info_sheet(
+                                    writer,
+                                    _build_split_info_rows(
+                                        uploaded_file.name,
+                                        selected_sheet,
+                                        header_row_input,
+                                        split_columns,
+                                        output_mode,
+                                        len(df_split_data),
+                                        total_outputs,
+                                        checked_columns,
+                                        clean_target_col if enable_auto_clean and final_clusters else None,
+                                        output_key=group.key,
+                                        output_rows=len(group.dataframe),
+                                    ),
+                                )
                             temp_buffer.seek(0)
 
                             if checked_columns:
-                                excel_bytes = _enforce_text_format_in_memory(temp_buffer.getvalue(), selected_sheet[:31], set(checked_columns))
+                                excel_bytes = _enforce_text_format_in_memory(temp_buffer.getvalue(), data_sheet_name, set(checked_columns))
                                 zf.writestr(filename, excel_bytes)
                             else:
                                 zf.writestr(filename, temp_buffer.getvalue())

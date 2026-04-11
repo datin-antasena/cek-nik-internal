@@ -5,7 +5,21 @@ from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
 
-def buat_excel_buffer(df_result, selected_sheet):
+def _write_info_sheet(writer, info_rows):
+    if not info_rows:
+        return
+
+    df_info = pd.DataFrame(info_rows)
+    df_info.to_excel(writer, index=False, sheet_name="INFO_PROSES")
+    info_ws = writer.book["INFO_PROSES"]
+    info_ws.column_dimensions["A"].width = 28
+    info_ws.column_dimensions["B"].width = 100
+    for col_letter in ("A", "B"):
+        for cell in info_ws[col_letter]:
+            cell.number_format = "@"
+
+
+def buat_excel_buffer(df_result, selected_sheet, info_rows=None):
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         sheet_name = f"Cek_{selected_sheet}"[:30]
@@ -17,6 +31,7 @@ def buat_excel_buffer(df_result, selected_sheet):
             ws.column_dimensions[col_letter].width = 25
             for cell in ws[col_letter]:
                 cell.number_format = "@"
+        _write_info_sheet(writer, info_rows)
 
     buffer.seek(0)
     return buffer
@@ -34,15 +49,7 @@ def buat_merge_excel_buffer(df_result, info_rows=None):
             for cell in ws[col_letter]:
                 cell.number_format = "@"
 
-        if info_rows:
-            df_info = pd.DataFrame(info_rows)
-            df_info.to_excel(writer, index=False, sheet_name="INFO_PROSES")
-            info_ws = writer.book["INFO_PROSES"]
-            info_ws.column_dimensions["A"].width = 28
-            info_ws.column_dimensions["B"].width = 100
-            for col_letter in ("A", "B"):
-                for cell in info_ws[col_letter]:
-                    cell.number_format = "@"
+        _write_info_sheet(writer, info_rows)
 
     buffer.seek(0)
     return buffer
@@ -64,6 +71,26 @@ def buat_merge_error_report_buffer(error_frames: dict[str, pd.DataFrame]):
         "DUPLIKAT": error_frames.get("duplicate_df", pd.DataFrame()),
         "KUNCI_KOSONG": error_frames.get("empty_key_df", pd.DataFrame()),
         "KOLOM_WAJIB_KOSONG": error_frames.get("required_empty_df", pd.DataFrame()),
+    }
+
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        for sheet_name, df in sheet_map.items():
+            df.to_excel(writer, index=False, sheet_name=sheet_name)
+            _format_text_sheet(writer, sheet_name, width=28 if sheet_name == "REKAP_ERROR" else 25)
+
+    buffer.seek(0)
+    return buffer
+
+
+def buat_validation_error_report_buffer(error_frames: dict[str, pd.DataFrame]):
+    buffer = io.BytesIO()
+    sheet_map = {
+        "REKAP_ERROR": error_frames.get("summary_df", pd.DataFrame()),
+        "DUPLIKAT": error_frames.get("duplicate_df", pd.DataFrame()),
+        "SUDAH_SALUR": error_frames.get("salur_df", pd.DataFrame()),
+        "KOSONG": error_frames.get("empty_df", pd.DataFrame()),
+        "TIDAK_VALID": error_frames.get("invalid_df", pd.DataFrame()),
+        "USIA_TIDAK_VALID": error_frames.get("usia_invalid_df", pd.DataFrame()),
     }
 
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:

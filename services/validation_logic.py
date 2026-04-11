@@ -213,6 +213,96 @@ def auto_detect_text_columns(columns: list) -> set:
     return detected
 
 
+def _normalize_col_name(col) -> str:
+    return _re.sub(r"[^A-Z0-9]", "", str(col).upper())
+
+
+def auto_detect_identity_columns(columns: list) -> list:
+    detected = []
+    for col in columns:
+        normalized = _normalize_col_name(col)
+        if normalized in ("NIK", "NONIK", "NIKPM", "NIKPENERIMAMANFAAT", "KK", "NOKK", "NKK", "NOKARTUKELUARGA"):
+            detected.append(col)
+        elif "NIK" in normalized or "NOKK" in normalized or normalized.endswith("KK"):
+            detected.append(col)
+    return detected
+
+
+def auto_detect_birthdate_columns(columns: list) -> list:
+    detected = []
+    for col in columns:
+        normalized = _normalize_col_name(col)
+        if any(keyword in normalized for keyword in ("TGLLAHIR", "TANGGALLAHIR", "TTL", "DOB", "LAHIR")):
+            detected.append(col)
+    return detected
+
+
+def build_validation_error_frames(df_result: pd.DataFrame, target_cols: list, usia_result: dict | None = None) -> dict[str, pd.DataFrame]:
+    duplicate_frames = []
+    salur_frames = []
+    empty_frames = []
+    invalid_frames = []
+
+    for col_name in target_cols:
+        status_col = f"STATUS_{col_name}"
+        if status_col not in df_result.columns:
+            continue
+
+        df_status = df_result.copy()
+        if "ERROR_KOLOM_DICEK" in df_status.columns:
+            df_status["ERROR_KOLOM_DICEK"] = col_name
+        else:
+            df_status.insert(0, "ERROR_KOLOM_DICEK", col_name)
+        duplicate_mask = df_status[status_col].astype(str).str.startswith("GANDA")
+        salur_mask = df_status[status_col].eq("SUDAH SALUR 2026")
+        empty_mask = df_status[status_col].eq("KOSONG")
+        invalid_mask = ~df_status[status_col].isin(["UNIK", "KOSONG", "SUDAH SALUR 2026"]) & ~duplicate_mask
+
+        if duplicate_mask.any():
+            duplicate_frames.append(df_status.loc[duplicate_mask])
+        if salur_mask.any():
+            salur_frames.append(df_status.loc[salur_mask])
+        if empty_mask.any():
+            empty_frames.append(df_status.loc[empty_mask])
+        if invalid_mask.any():
+            invalid_frames.append(df_status.loc[invalid_mask])
+
+    usia_invalid_frames = []
+    for col_tgl, (_, kategori_col, parsed_col, catatan_col) in (usia_result or {}).items():
+        if kategori_col not in df_result.columns:
+            continue
+        mask = df_result[kategori_col].eq("TIDAK VALID")
+        cols = [col for col in [col_tgl, parsed_col, catatan_col, kategori_col] if col in df_result.columns]
+        if mask.any() and cols:
+            usia_invalid_frames.append(df_result.loc[mask, cols])
+
+    def _concat(frames):
+        return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+    duplicate_df = _concat(duplicate_frames)
+    salur_df = _concat(salur_frames)
+    empty_df = _concat(empty_frames)
+    invalid_df = _concat(invalid_frames)
+    usia_invalid_df = _concat(usia_invalid_frames)
+    summary_df = pd.DataFrame(
+        [
+            {"Jenis Error": "DUPLIKAT", "Jumlah Baris": len(duplicate_df)},
+            {"Jenis Error": "SUDAH SALUR 2026", "Jumlah Baris": len(salur_df)},
+            {"Jenis Error": "KOSONG", "Jumlah Baris": len(empty_df)},
+            {"Jenis Error": "TIDAK VALID NIK/NKK", "Jumlah Baris": len(invalid_df)},
+            {"Jenis Error": "TANGGAL LAHIR TIDAK VALID", "Jumlah Baris": len(usia_invalid_df)},
+        ]
+    )
+    return {
+        "duplicate_df": duplicate_df,
+        "salur_df": salur_df,
+        "empty_df": empty_df,
+        "invalid_df": invalid_df,
+        "usia_invalid_df": usia_invalid_df,
+        "summary_df": summary_df,
+    }
+
+
 def _tokenize(val: str) -> set:
     val = str(val).lower().strip()
     val = val.replace(".", " ").replace(",", " ").replace("-", " ")

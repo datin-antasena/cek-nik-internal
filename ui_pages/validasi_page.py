@@ -6,11 +6,17 @@ import plotly.express as px
 import streamlit as st
 
 from config import COLOR_MAP, COLOR_MAP_KATEGORI, STYLES
-from services.export_helpers import bersihkan_nama_file, buat_excel_buffer
+from services.export_helpers import bersihkan_nama_file, buat_excel_buffer, buat_validation_error_report_buffer
 from services.file_loading import baca_data_penuh, baca_preview_mentah, siapkan_dataframe, tampilkan_nomor_baris_excel
 from services.logging_utils import catat_log
 from services.reference_data import ambil_data_salur_gspread
-from services.validation_logic import proses_kolom, proses_kolom_usia
+from services.validation_logic import (
+    auto_detect_birthdate_columns,
+    auto_detect_identity_columns,
+    build_validation_error_frames,
+    proses_kolom,
+    proses_kolom_usia,
+)
 
 
 def render_charts(df_result, col_name):
@@ -172,10 +178,72 @@ def render_sidebar(waktu_tarik):
         st.caption("Sistem mengunci memori selama 1 jam untuk mencegah blokir server Google.")
 
 
+def _build_validation_info_rows(
+    uploaded_file_name,
+    selected_sheet,
+    header_row_input,
+    target_cols,
+    use_auto_clean,
+    hasil_usia,
+    row_count,
+    error_frames,
+):
+    rows = [
+        {"Bagian": "File Input", "Detail": uploaded_file_name},
+        {"Bagian": "Sheet Input", "Detail": selected_sheet},
+        {"Bagian": "Header Row", "Detail": str(header_row_input)},
+        {"Bagian": "Kolom NIK/NKK", "Detail": ", ".join(target_cols) or "-"},
+        {"Bagian": "Auto Cleaning", "Detail": "Ya" if use_auto_clean else "Tidak"},
+        {"Bagian": "Kolom Tanggal Lahir", "Detail": ", ".join(hasil_usia.keys()) if hasil_usia else "-"},
+        {"Bagian": "Jumlah Baris Hasil", "Detail": str(row_count)},
+    ]
+    summary_df = error_frames.get("summary_df") if error_frames else None
+    if summary_df is not None and not summary_df.empty:
+        for _, row in summary_df.iterrows():
+            rows.append({"Bagian": f"Rekap {row['Jenis Error']}", "Detail": str(row["Jumlah Baris"])})
+    return rows
+
+
+def _render_validation_error_tabs(error_frames):
+    st.subheader("Pemeriksaan Error")
+    duplicate_df = error_frames.get("duplicate_df", pd.DataFrame())
+    salur_df = error_frames.get("salur_df", pd.DataFrame())
+    empty_df = error_frames.get("empty_df", pd.DataFrame())
+    invalid_df = error_frames.get("invalid_df", pd.DataFrame())
+    usia_invalid_df = error_frames.get("usia_invalid_df", pd.DataFrame())
+    summary_df = error_frames.get("summary_df", pd.DataFrame())
+
+    tabs = st.tabs(["Duplikat", "Sudah Salur", "Kosong", "Tidak Valid", "Usia Tidak Valid", "Rekap Error"])
+    tab_data = [
+        (tabs[0], duplicate_df, "Tidak ada data duplikat."),
+        (tabs[1], salur_df, "Tidak ada data yang sudah salur 2026."),
+        (tabs[2], empty_df, "Tidak ada data kosong."),
+        (tabs[3], invalid_df, "Tidak ada data NIK/NKK tidak valid."),
+        (tabs[4], usia_invalid_df, "Tidak ada tanggal lahir tidak valid."),
+    ]
+    for tab, df_error, empty_message in tab_data:
+        with tab:
+            if df_error.empty:
+                st.success(empty_message)
+            else:
+                st.caption(f"Menampilkan {len(df_error)} baris.")
+                st.dataframe(df_error, use_container_width=True)
+    with tabs[5]:
+        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
+    return any(not frame.empty for frame in [duplicate_df, salur_df, empty_df, invalid_df, usia_invalid_df])
+
+
 def render_validasi_page():
     st.markdown(STYLES, unsafe_allow_html=True)
     st.title("Dashboard Validasi Data - Internal Antasena")
     st.info("Fitur: Atur Posisi Header, Multi-Kolom, Multi-Sheet, Auto Cleansing, Visualisasi, Auto-Format Text & Kategori Umur.")
+
+    if st.button("RESET PROSES VALIDASI", use_container_width=True):
+        for key in ["df_result", "target_cols_saved", "hasil_usia", "validation_error_frames", "validation_info_rows"]:
+            st.session_state.pop(key, None)
+        st.session_state.is_processed = False
+        st.rerun()
 
     set_salur_2026, waktu_tarik = ambil_data_salur_gspread()
     render_sidebar(waktu_tarik)
@@ -224,10 +292,18 @@ def render_validasi_page():
             return
 
         col_left, col_right = st.columns([3, 1])
+        detected_identity_cols = auto_detect_identity_columns(cols)
         with col_left:
-            target_cols = st.multiselect("Pilih Kolom yang akan dicek (NIK/NKK):", cols, placeholder="Pilih kolom NIK, KK, dll...")
+            target_cols = st.multiselect(
+                "Pilih Kolom yang akan dicek (NIK/NKK):",
+                cols,
+                default=detected_identity_cols,
+                placeholder="Pilih kolom NIK, KK, dll...",
+            )
         with col_right:
             use_auto_clean = st.checkbox("Aktifkan Auto-Cleaning", value=False, help="Otomatis menghapus spasi, titik, strip, dan huruf.")
+        if detected_identity_cols:
+            st.caption(f"Kolom NIK/NKK terdeteksi otomatis: {', '.join(detected_identity_cols)}")
 
         st.divider()
         st.subheader("3. Cek Kategori Umur (Opsional)")
@@ -244,15 +320,19 @@ def render_validasi_page():
         cols_tgl_lahir_dipilih = []
         tgl_pengecekan = datetime.now(ZoneInfo("Asia/Jakarta")).replace(tzinfo=None)
         dayfirst = True
+        detected_birthdate_cols = auto_detect_birthdate_columns(cols)
         if aktifkan_cek_umur:
             col_umur_left, col_umur_right = st.columns([3, 1])
             with col_umur_left:
                 cols_tgl_lahir_dipilih = st.multiselect(
                     "Pilih Kolom Tanggal Lahir:",
                     cols,
+                    default=detected_birthdate_cols,
                     placeholder="Pilih kolom yang berisi tanggal lahir...",
                     help="Format tanggal yang didukung: dd/mm/yyyy, dd-mm-yyyy, yyyy-mm-dd, serial Excel, dll.",
                 )
+                if detected_birthdate_cols:
+                    st.caption(f"Kolom tanggal lahir terdeteksi otomatis: {', '.join(detected_birthdate_cols)}")
             with col_umur_right:
                 tgl_pengecekan_input = st.date_input(
                     "Tanggal Pengecekan:",
@@ -304,9 +384,22 @@ def render_validasi_page():
                             hasil_usia[col_tgl] = (usia_col, kategori_col, parsed_col, catatan_col)
 
                     catat_log(uploaded_file.name, selected_sheet, log_data_all)
+                    error_frames = build_validation_error_frames(df_result, target_cols, hasil_usia)
+                    info_rows = _build_validation_info_rows(
+                        uploaded_file.name,
+                        selected_sheet,
+                        header_row_input,
+                        target_cols,
+                        use_auto_clean,
+                        hasil_usia,
+                        len(df_result),
+                        error_frames,
+                    )
                     st.session_state.df_result = df_result
                     st.session_state.target_cols_saved = target_cols
                     st.session_state.hasil_usia = hasil_usia
+                    st.session_state.validation_error_frames = error_frames
+                    st.session_state.validation_info_rows = info_rows
                     st.session_state.is_processed = True
 
         if st.session_state.get("is_processed") and st.session_state.get("target_cols_saved") == target_cols:
@@ -336,7 +429,21 @@ def render_validasi_page():
                 render_filtered_table_usia(df_result, [v[1] for v in hasil_usia.values()])
 
             st.divider()
-            buffer = buat_excel_buffer(df_result, selected_sheet)
+            error_frames = st.session_state.get("validation_error_frames", {})
+            if error_frames:
+                has_error_rows = _render_validation_error_tabs(error_frames)
+                if has_error_rows:
+                    clean_name = bersihkan_nama_file(uploaded_file.name)
+                    error_buffer = buat_validation_error_report_buffer(error_frames)
+                    st.download_button(
+                        label="Download Error Report Validasi (Excel)",
+                        data=error_buffer,
+                        file_name=f"Error_Report_{clean_name}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+
+            st.divider()
+            buffer = buat_excel_buffer(df_result, selected_sheet, st.session_state.get("validation_info_rows", []))
             clean_name = bersihkan_nama_file(uploaded_file.name)
             st.download_button(
                 label="Download Hasil Seluruhnya (Excel)",
