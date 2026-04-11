@@ -2,19 +2,47 @@ import io
 
 import pandas as pd
 from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 
 
 def buat_excel_buffer(df_result, selected_sheet):
     buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         sheet_name = f"Cek_{selected_sheet}"[:30]
         df_result.to_excel(writer, index=False, sheet_name=sheet_name)
 
-        wb = writer.book
-        ws = writer.sheets[sheet_name]
-        txt_fmt = wb.add_format({"num_format": "@"})
+        ws = writer.book[sheet_name]
         for idx in range(len(df_result.columns)):
-            ws.set_column(idx, idx, 25, txt_fmt)
+            col_letter = get_column_letter(idx + 1)
+            ws.column_dimensions[col_letter].width = 25
+            for cell in ws[col_letter]:
+                cell.number_format = "@"
+
+    buffer.seek(0)
+    return buffer
+
+
+def buat_merge_excel_buffer(df_result, info_rows=None):
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df_result.to_excel(writer, index=False, sheet_name="MERGED_DATA")
+
+        ws = writer.book["MERGED_DATA"]
+        for idx in range(len(df_result.columns)):
+            col_letter = get_column_letter(idx + 1)
+            ws.column_dimensions[col_letter].width = 25
+            for cell in ws[col_letter]:
+                cell.number_format = "@"
+
+        if info_rows:
+            df_info = pd.DataFrame(info_rows)
+            df_info.to_excel(writer, index=False, sheet_name="INFO_PROSES")
+            info_ws = writer.book["INFO_PROSES"]
+            info_ws.column_dimensions["A"].width = 28
+            info_ws.column_dimensions["B"].width = 100
+            for col_letter in ("A", "B"):
+                for cell in info_ws[col_letter]:
+                    cell.number_format = "@"
 
     buffer.seek(0)
     return buffer

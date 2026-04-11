@@ -2,3 +2,4 @@ push.bat
 output/
 tmp/
 __pycache__/
+backup/

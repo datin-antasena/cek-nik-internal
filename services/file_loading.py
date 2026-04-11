@@ -14,7 +14,6 @@ def baca_preview_mentah(uploaded_file, selected_sheet, is_csv):
         sheet_name=selected_sheet,
         header=None,
         nrows=10,
-        engine="openpyxl",
     )
 
 
@@ -23,15 +22,15 @@ def baca_data_penuh(uploaded_file, selected_sheet, is_csv, header_row_input):
     if is_csv:
         uploaded_file.seek(0)
         try:
-            return pd.read_csv(uploaded_file, header=header_idx)
+            return pd.read_csv(uploaded_file, header=header_idx, dtype=str)
         except Exception:
             uploaded_file.seek(0)
-            return pd.read_csv(uploaded_file, header=header_idx, sep=";")
+            return pd.read_csv(uploaded_file, header=header_idx, sep=";", dtype=str)
     return pd.read_excel(
         uploaded_file,
         sheet_name=selected_sheet,
         header=header_idx,
-        engine="openpyxl",
+        dtype=str,
     )
 
 

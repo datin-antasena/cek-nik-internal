@@ -32,8 +32,7 @@ STYLES = """
 }
 </style>
 <div class="footer">
-    Dikembangkan oleh <strong>POKJA DATA DAN INFORMASI</strong>
-    untuk digunakan internal <strong>Antasena</strong>
+    Dikembangkan secara internal untuk mendukung kerja data <strong>Antasena</strong>
 </div>
 """
 
@@ -61,14 +60,17 @@ TEXT_COLUMNS_KEYWORDS = [
 ]
 
 SPLIT_HELP_TEXT = {
-    "upload": "Upload file Excel (.xlsx, .xlsm, .xls). File akan diproses di memory server dan tidak disimpan secara permanen.",
+    "upload": "Upload file Excel/CSV. File akan diproses di memory server dan tidak disimpan secara permanen.",
     "header_row": "Baris yang berisi nama kolom header. Default: 1 (baris pertama). Ubah jika header tidak di baris pertama.",
     "kolom_split": "Pilih kolom yang nilainya akan digunakan untuk memecah file. Setiap unique value di kolom ini akan menjadi 1 file output terpisah.",
+    "kolom_split_bertingkat": "Pilih satu atau beberapa kolom. Urutan pilihan menjadi level split, misalnya Provinsi > Kabupaten > Kecamatan.",
     "preview_stats": "Menampilkan statistik dasar: jumlah baris data, jumlah unique value di kolom split, dan estimasi jumlah file yang akan dihasilkan.",
+    "preview_stats_bertingkat": "Menampilkan statistik dasar split bertingkat: total baris, jumlah level, estimasi output, dan jumlah sel split yang kosong.",
     "auto_clean": "Gabungkan nilai yang serupa menjadi satu. Contoh: 'kab. boyolali', 'kabupaten boyolali', 'KABUPATEN BOYOLALI' akan digabung menjadi satu nilai. Menggunakan fuzzy matching dengan threshold 80%.",
     "text_format": "Aktifkan untuk menjaga format teks di kolom tertentu agar tidak terkonversi menjadi angka oleh Excel. Contoh: NIK '0012345678901234' tidak berubah jadi '1.2345E+15'.",
     "select_columns": "Pilih kolom yang perlu diformat sebagai teks. Sistem akan otomatis mendeteksi kolom yang mengandung keyword seperti: NIK, KK, NO. HP, TANGGAL, SK, BAST.",
     "select_all": "Centang untuk memilih semua kolom. Batalkan centang untuk membatalkan semua pilihan.",
     "process": "Memulai proses pemisahan file. File output akan dibundle dalam 1 file ZIP untuk download.",
     "cancel": "Membatalkan proses. Semua file yang sudah dibuat akan dihapus.",
+    "merge_upload": "Upload beberapa file Excel/CSV. Pilih satu workbook/sheet sebagai master, lalu mapping kolom dari sheet sumber ke struktur master.",
 }
