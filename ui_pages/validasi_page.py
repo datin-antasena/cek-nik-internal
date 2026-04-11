@@ -170,23 +170,6 @@ def render_sidebar(waktu_tarik):
     with st.sidebar:
         st.info(f"Data Salur Terakhir Ditarik:\n\n{waktu_tarik}")
         st.caption("Sistem mengunci memori selama 1 jam untuk mencegah blokir server Google.")
-        st.divider()
-
-        st.header("Admin Panel")
-        if st.checkbox("Lihat Log Aktivitas"):
-            try:
-                with open("activity_log.txt", "r") as f:
-                    st.text(f.read())
-            except Exception:
-                st.text("Log kosong.")
-
-        if st.button("Hapus Log"):
-            try:
-                with open("activity_log.txt", "w"):
-                    pass
-                st.rerun()
-            except Exception:
-                pass
 
 
 def render_validasi_page():
