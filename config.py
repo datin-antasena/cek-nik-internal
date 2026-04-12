@@ -1,5 +1,51 @@
 STYLES = """
 <style>
+/* ── Page title (st.title → h1) ── */
+h1 {
+    color: #1C549D !important;
+    font-weight: 700;
+}
+
+/* ── Metric value & container ── */
+[data-testid="stMetricValue"] {
+    font-size: 2rem;
+    font-weight: bold;
+    color: #2E9D32;
+}
+[data-testid="stMetric"] {
+    border-left: 4px solid #2E9D32;
+    padding-left: 8px;
+}
+
+/* ── Success alert: green left border ── */
+[data-testid="stNotificationContentSuccess"],
+div[data-testid="stAlert"] > div[role="alert"][data-baseweb="notification"][kind="positive"] {
+    border-left: 4px solid #2E9D32 !important;
+}
+
+/* ── Primary & default action buttons ── */
+[data-testid="stBaseButton-primary"] > button,
+[data-testid="stBaseButton-secondary"] > button,
+.stButton > button {
+    background-color: #2E9D32 !important;
+    color: #FFFFFF !important;
+    border: 1px solid #236E26 !important;
+    font-weight: 600;
+}
+[data-testid="stBaseButton-primary"] > button:hover,
+[data-testid="stBaseButton-secondary"] > button:hover,
+.stButton > button:hover {
+    background-color: #236E26 !important;
+    border-color: #1A5220 !important;
+}
+
+/* ── Sidebar title ── */
+[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] .stMarkdown h1 {
+    color: #1C549D !important;
+}
+
+/* ── Footer ── */
 .footer {
     position: fixed;
     left: 0; bottom: 0;
@@ -9,16 +55,12 @@ STYLES = """
     text-align: center;
     padding: 10px;
     font-size: 13px;
-    border-top: 1px solid #dee2e6;
+    border-top: 2px solid #2E9D32;
     z-index: 1000;
 }
 .stApp { margin-bottom: 80px; }
 
-[data-testid="stMetricValue"] {
-    font-size: 2rem;
-    font-weight: bold;
-    color: #0d6efd;
-}
+/* ── Checkbox ── */
 .stCheckbox {
     background-color: #e2e3e5;
     padding: 10px;
