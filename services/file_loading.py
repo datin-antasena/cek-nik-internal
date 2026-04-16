@@ -44,6 +44,11 @@ def siapkan_dataframe(df, hapus_baris_penomoran):
     df = df.astype(str)
     for col in df.columns:
         df[col] = df[col].replace("nan", "").str.replace(r"\.0$", "", regex=True)
+        df[col] = df[col].str.replace(
+            r'^(\d{4})-(\d{2})-(\d{2}) \d{2}:\d{2}:\d{2}$',
+            r'\3/\2/\1',
+            regex=True,
+        )
 
     return df
 
